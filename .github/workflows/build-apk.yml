@@ -1,0 +1,40 @@
+name: ساخت APK شیفتالو
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: دریافت کد
+        uses: actions/checkout@v4
+
+      - name: تنظیم جاوا
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: تنظیم اندروید
+        uses: android-actions/setup-android@v3
+
+      - name: تنظیم Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: ساخت نسخه نصب‌شونده
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: نام‌گذاری خروجی
+        run: cp app/build/outputs/apk/debug/app-debug.apk Shiftaloo.apk
+
+      - name: بارگذاری APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Shiftaloo-APK
+          path: Shiftaloo.apk
+          if-no-files-found: error

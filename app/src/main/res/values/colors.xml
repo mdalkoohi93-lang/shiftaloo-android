@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="peach">#FF8D79</color>
+    <color name="peach_dark">#E96457</color>
+    <color name="cream">#FFF8EF</color>
+    <color name="ink">#342A2B</color>
+    <color name="muted">#7B6E6F</color>
+    <color name="mint">#DDF4E8</color>
+    <color name="sun">#FFD66B</color>
+    <color name="night">#6F72C9</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="danger">#C53B45</color>
+</resources>
