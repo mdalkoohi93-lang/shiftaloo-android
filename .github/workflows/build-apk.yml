@@ -30,7 +30,7 @@ jobs:
           gradle-version: '8.9'
 
       - name: ساخت نسخه نصب‌شونده
-        run: gradle :app:assembleDebug --stacktrace
+        run: gradle :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
 
       - name: نام‌گذاری خروجی
         run: cp app/build/outputs/apk/debug/app-debug.apk Shiftaloo.apk
@@ -41,3 +41,28 @@ jobs:
           name: Shiftaloo-APK
           path: Shiftaloo.apk
           if-no-files-found: error
+
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Native Android smoke tests and screenshots
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: bash scripts/emulator-test.sh
+
+      - name: Save screenshots and test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Shiftaloo-Android-QA
+          path: qa-output/
+          if-no-files-found: warn

@@ -15,7 +15,7 @@
         <ImageView
             android:layout_width="34dp"
             android:layout_height="34dp"
-            android:src="@mipmap/ic_launcher" />
+            android:src="@drawable/peach_nurse" />
         <TextView
             android:layout_width="0dp"
             android:layout_height="wrap_content"

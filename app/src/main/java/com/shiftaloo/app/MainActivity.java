@@ -1,583 +1,128 @@
 package com.shiftaloo.app;
 
 import android.Manifest;
-import android.app.Activity;
-import android.app.AlarmManager;
-import android.app.AlertDialog;
-import android.content.Context;
-import android.content.Intent;
+import android.app.*;
+import android.content.*;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
-import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
 import android.net.Uri;
-import android.os.Build;
-import android.os.Bundle;
+import android.os.*;
 import android.provider.Settings;
-import android.text.InputType;
-import android.view.Gravity;
-import android.view.LayoutInflater;
-import android.view.View;
-import android.view.ViewGroup;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
-import android.widget.BaseAdapter;
-import android.widget.Button;
-import android.widget.CheckBox;
-import android.widget.EditText;
-import android.widget.FrameLayout;
-import android.widget.GridLayout;
-import android.widget.ImageButton;
-import android.widget.LinearLayout;
-import android.widget.ListView;
-import android.widget.ScrollView;
-import android.widget.Spinner;
-import android.widget.TextView;
-import android.widget.Toast;
+import android.view.*;
+import android.widget.*;
+import java.time.*;
+import java.util.*;
+import java.util.function.Consumer;
 
-import java.time.Instant;
-import java.time.ZoneId;
-import java.util.ArrayList;
-import java.util.List;
-
+/** Native Android Views and SQLite. No WebView, login or network layer. */
 public final class MainActivity extends Activity {
-    private DbHelper db;
-    private FrameLayout content;
-    private int viewYear;
-    private int viewMonth;
-    private int activeTab = 0;
-    private int pendingQuickType = -1;
+    DbHelper db; Ui u; LinearLayout root,nav,addArea; FrameLayout content;
+    int tab=0,year,month; PersianDate selected;
+    long hospitalFilter=0,reportHospital=0; String typeFilter=null; int paidFilter=-1;
+    PersianDate filterFrom,filterTo; boolean chartCount=false; Dialog activeSheet;
+    final String[] types={Shift.TYPE_DAY,Shift.TYPE_EVENING,Shift.TYPE_NIGHT};
+    final String[] typeNames={"روزکار","عصرکار","شب‌کار"};
 
-    @Override protected void onCreate(Bundle state) {
-        super.onCreate(state);
-        setContentView(R.layout.activity_main);
-        getWindow().setStatusBarColor(getColor(R.color.cream));
-        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
-        db = new DbHelper(this);
-        content = findViewById(R.id.content);
-        PersianDate today = PersianDate.today();
-        viewYear = today.year;
-        viewMonth = today.month;
-        ((TextView) findViewById(R.id.todayLabel)).setText(today.longText());
-
-        findViewById(R.id.addShiftButton).setOnClickListener(v -> showShiftDialog(null, null));
-        findViewById(R.id.tabAgenda).setOnClickListener(v -> showTab(0));
-        findViewById(R.id.tabCalendar).setOnClickListener(v -> showTab(1));
-        findViewById(R.id.tabReports).setOnClickListener(v -> showTab(2));
-        findViewById(R.id.tabHospitals).setOnClickListener(v -> showTab(3));
-        requestNotificationPermission();
-        showTab(0);
+    @Override public void onCreate(Bundle state){
+        super.onCreate(state);u=new Ui(this);db=new DbHelper(this);selected=PersianDate.today();year=selected.year;month=selected.month;
+        if(state!=null){tab=state.getInt("tab");year=state.getInt("year",year);month=state.getInt("month",month);selected=PersianDate.parse(state.getString("selected",selected.key()));hospitalFilter=state.getLong("hospital");reportHospital=state.getLong("reportHospital");typeFilter=state.getString("type");paidFilter=state.getInt("paid",-1);if(state.getString("from")!=null)filterFrom=PersianDate.parse(state.getString("from"));if(state.getString("to")!=null)filterTo=PersianDate.parse(state.getString("to"));}
+        root=u.col();root.setBackgroundColor(Ui.BG);
+        getWindow().setStatusBarColor(Ui.BG);getWindow().setNavigationBarColor(Color.WHITE);
+        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        if(Build.VERSION.SDK_INT>=30){getWindow().setDecorFitsSystemWindows(false);root.setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Insets i=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout());v.setPadding(i.left,i.top,i.right,i.bottom);return insets;});}
+        root.addView(header(),u.full(112));content=new FrameLayout(this);root.addView(content,new LinearLayout.LayoutParams(-1,0,1));
+        addArea=u.col();addArea.setPadding(u.dp(16),u.dp(6),u.dp(16),u.dp(4));root.addView(addArea,u.full(-2));
+        nav=u.row();nav.setPadding(u.dp(8),u.dp(5),u.dp(8),u.dp(5));nav.setBackgroundColor(Color.WHITE);root.addView(nav,u.full(70));setContentView(root);showTab(tab);
     }
-
-    @Override protected void onResume() {
-        super.onResume();
-        if (content != null) showTab(activeTab);
+    @Override protected void onSaveInstanceState(Bundle b){super.onSaveInstanceState(b);b.putInt("tab",tab);b.putInt("year",year);b.putInt("month",month);b.putString("selected",selected.key());b.putLong("hospital",hospitalFilter);b.putLong("reportHospital",reportHospital);b.putString("type",typeFilter);b.putInt("paid",paidFilter);if(filterFrom!=null)b.putString("from",filterFrom.key());if(filterTo!=null)b.putString("to",filterTo.key());}
+    @Override protected void onResume(){super.onResume();if(db!=null)for(Shift s:db.futureShifts(System.currentTimeMillis(),10000))if(s.alarmEnabled)AlarmScheduler.schedule(this,s);}
+    View header(){
+        LinearLayout h=u.row();h.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);h.setPadding(u.dp(18),u.dp(10),u.dp(16),u.dp(8));
+        h.addView(u.art(R.drawable.peach_nurse),new LinearLayout.LayoutParams(u.dp(82),u.dp(94)));
+        LinearLayout brand=u.col();brand.setGravity(Gravity.CENTER);TextView title=u.text("شیفتالو",32,Ui.INK,true);title.setGravity(Gravity.CENTER);brand.addView(title);TextView subtitle=u.text("برنامه شیفت‌های بیمارستان",10,Ui.INK,true);subtitle.setGravity(Gravity.CENTER);brand.addView(subtitle,u.gap(-2,2));h.addView(brand,u.weight(-1));
+        LinearLayout note=u.col();note.setGravity(Gravity.CENTER);note.setPadding(u.dp(7),u.dp(8),u.dp(7),u.dp(8));u.touch(note,0xffffedf3,23,0);TextView t=u.text("با نظم\nروزهای بهتر\nمی‌سازیم",11,0xff775382,false);t.setGravity(Gravity.CENTER);t.setLineSpacing(u.dp(2),1);note.addView(t);note.addView(u.icon(Ui.HEART,14,0xffb6678b,true));note.setContentDescription("تنظیمات و راهنمای شیفتالو");note.setOnClickListener(v->settings());h.addView(note,new LinearLayout.LayoutParams(u.dp(82),u.dp(90)));return h;
     }
-
-    private void showTab(int tab) {
-        activeTab = tab;
-        int[] tabs = {R.id.tabAgenda, R.id.tabCalendar, R.id.tabReports, R.id.tabHospitals};
-        for (int i = 0; i < tabs.length; i++) findViewById(tabs[i]).setSelected(i == tab);
-        content.removeAllViews();
-        if (tab == 1) content.addView(calendarPage());
-        else if (tab == 2) content.addView(reportPage());
-        else if (tab == 3) content.addView(hospitalsPage());
-        else content.addView(agendaPage());
+    void showTab(int which){tab=which;content.removeAllViews();addArea.removeAllViews();nav.removeAllViews();
+        String[] labels={"شیفت‌ها","تقویم","گزارش","بیمارستان‌ها"};String[] icons={Ui.HOME,Ui.CALENDAR,Ui.REPORT,Ui.HOSPITAL};
+        for(int i=0;i<4;i++){final int index=i;LinearLayout item=u.col();item.setGravity(Gravity.CENTER);u.touch(item,Color.WHITE,12,0);item.addView(u.icon(icons[i],26,i==tab?Ui.PINK:Ui.MUTED,true),u.full(30));TextView label=u.text(labels[i],11,i==tab?Ui.PINK:Ui.MUTED,true);label.setGravity(Gravity.CENTER);item.addView(label,u.full(22));item.setContentDescription(labels[i]);item.setTag("tab"+i);item.setOnClickListener(v->showTab(index));nav.addView(item,u.weight(-1));}
+        LinearLayout page=u.col();page.setPadding(u.dp(16),0,u.dp(16),u.dp(12));ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setClipToPadding(false);scroll.addView(page);content.addView(scroll,new FrameLayout.LayoutParams(-1,-1));
+        if(tab==0){home(page);LinearLayout b=u.button("افزودن شیفت تازه",Ui.PLUS,true,()->editShift(null,PersianDate.today(),0));b.setTag("addShift");addArea.addView(b,u.full(52));}
+        else if(tab==1)calendar(page);else if(tab==2)reports(page);else hospitals(page);
     }
-
-    private View agendaPage() {
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        LinearLayout root = column();
-        root.setPadding(dp(16), dp(4), dp(16), dp(28));
-        scroll.addView(root);
-
-        List<Shift> future = db.futureShifts(System.currentTimeMillis(), 1);
-        LinearLayout nextCard = column();
-        nextCard.setBackgroundResource(R.drawable.bg_next_shift);
-        nextCard.setElevation(dp(5));
-        if (future.isEmpty()) {
-            nextCard.addView(kicker("شیفت بعدی"));
-            nextCard.addView(heading("فعلاً شیفتی در راه نیست 🌱", 20));
-            nextCard.addView(muted("از دکمه‌های پایین یک شیفت تازه بساز."));
-            nextCard.setOnClickListener(v -> showShiftDialog(null, null));
-        } else {
-            Shift upcoming = future.get(0);
-            nextCard.addView(kicker("شیفت بعدی"));
-            nextCard.addView(heading(PersianDate.fromMillis(upcoming.startMillis).longText(), 22));
-            nextCard.addView(heading(upcoming.typeName() + " · " + upcoming.hospitalName, 16));
-            nextCard.addView(muted(timeRange(upcoming) + (upcoming.alarmEnabled ? " · زنگ فعال" : "")));
-            nextCard.setOnClickListener(v -> showShiftDialog(upcoming, null));
-        }
-        root.addView(nextCard);
-
-        LinearLayout shortcutCard = card();
-        shortcutCard.addView(kicker("ثبت سریع"));
-        shortcutCard.addView(heading("چه شیفتی داری؟", 17));
-        LinearLayout shortcuts = row();
-        Button dayQuick = shortcut("☀\nروزکار\n۷ تا ۱۵", R.drawable.bg_day, R.color.mint_ink);
-        Button eveningQuick = shortcut("◒\nعصرکار\n۱۵ تا ۲۳", R.drawable.bg_evening, R.color.peach_dark);
-        Button nightQuick = shortcut("☾\nشب‌کار\n۱۹ تا ۷", R.drawable.bg_night, R.color.lilac_ink);
-        dayQuick.setOnClickListener(v -> quickShift(0)); eveningQuick.setOnClickListener(v -> quickShift(1)); nightQuick.setOnClickListener(v -> quickShift(2));
-        shortcuts.addView(dayQuick, weightHeight(dp(102))); shortcuts.addView(eveningQuick, weightHeight(dp(102))); shortcuts.addView(nightQuick, weightHeight(dp(102)));
-        shortcutCard.addView(shortcuts, marginTop(10));
-        root.addView(shortcutCard, marginTop(14));
-
-        LinearLayout listCard = card();
-        LinearLayout monthBar = row();
-        Button next = smallButton("‹");
-        TextView title = heading(monthTitle(), 18); title.setGravity(Gravity.CENTER);
-        Button previous = smallButton("›");
-        monthBar.addView(next); monthBar.addView(title, weight()); monthBar.addView(previous);
-        listCard.addView(monthBar);
-
-        List<Hospital> hospitals = db.hospitals();
-        Spinner hospital = spinner(hospitalNames(hospitals, true));
-        Spinner type = spinner(new String[]{"همه نوع‌ها", "روزکار", "عصرکار", "شب‌کار"});
-        Spinner paid = spinner(new String[]{"پرداخت: همه", "پرداخت‌شده", "پرداخت‌نشده"});
-        LinearLayout filter1 = row(); filter1.setPadding(0, dp(8), 0, dp(6));
-        filter1.addView(hospital, weight()); filter1.addView(type, weight());
-        listCard.addView(filter1); listCard.addView(paid, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)));
-        LinearLayout list = column(); listCard.addView(list, marginTop(8));
-        root.addView(listCard, marginTop(14));
-
-        Runnable refresh = () -> {
-            PersianDate first = new PersianDate(viewYear, viewMonth, 1);
-            long hospitalId = hospital.getSelectedItemPosition() <= 0 ? 0 : hospitals.get(hospital.getSelectedItemPosition() - 1).id;
-            String shiftType = typeCode(type.getSelectedItemPosition());
-            int paidFilter = paid.getSelectedItemPosition() == 0 ? -1 : paid.getSelectedItemPosition() == 1 ? 1 : 0;
-            List<Shift> shifts = db.filteredShifts(first.atTimeMillis(0, 0), nextMonth(first).atTimeMillis(0, 0), hospitalId, shiftType, paidFilter);
-            title.setText(monthTitle() + " · " + Fa.n(shifts.size()) + " شیفت");
-            list.removeAllViews();
-            if (shifts.isEmpty()) list.addView(empty("برای این فیلتر شیفتی پیدا نشد 🍑"));
-            for (int i = 0; i < shifts.size(); i++) {
-                Shift shift = shifts.get(i);
-                View item = new ShiftAdapter(shifts).getView(i, null, list);
-                item.setOnClickListener(v -> showShiftDialog(shift, null));
-                item.setOnLongClickListener(v -> { confirmDelete(shift); return true; });
-                list.addView(item);
-            }
-        };
-        AdapterView.OnItemSelectedListener changed = new AdapterView.OnItemSelectedListener() {
-            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) { refresh.run(); }
-            @Override public void onNothingSelected(AdapterView<?> parent) {}
-        };
-        hospital.setOnItemSelectedListener(changed);
-        type.setOnItemSelectedListener(changed);
-        paid.setOnItemSelectedListener(changed);
-        previous.setOnClickListener(v -> { moveMonth(-1); showTab(0); });
-        next.setOnClickListener(v -> { moveMonth(1); showTab(0); });
-        refresh.run();
-        return scroll;
+    void heading(LinearLayout p,String label,String icon){LinearLayout r=u.row();r.setGravity(Gravity.CENTER);if(icon!=null)r.addView(u.icon(icon,24,Ui.INK,true),new LinearLayout.LayoutParams(u.dp(32),u.dp(40)));r.addView(u.text(label,20,Ui.INK,true));p.addView(r,u.full(46));}
+    void home(LinearLayout p){
+        List<Shift> upcoming=db.futureShifts(System.currentTimeMillis(),1);Shift s=upcoming.isEmpty()?null:upcoming.get(0);
+        LinearLayout hero=u.row();hero.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);hero.setPadding(u.dp(15),u.dp(14),u.dp(4),u.dp(10));u.touch(hero,0xffffe9ef,22,0xffffd3df);
+        LinearLayout copy=u.col();copy.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);copy.setGravity(Gravity.LEFT);copy.addView(u.text(s!=null&&s.startMillis<System.currentTimeMillis()?"شیفت در حال انجام":"شیفت بعدی",21,Ui.PINK,true));
+        copy.addView(u.text(s==null?"برای روزهای خوب آماده‌ای؟":dateText(PersianDate.fromMillis(s.startMillis),true),16,Ui.INK,true),u.gap(-2,12));TextView place=u.text(s==null?"اولین شیفتت را ثبت کن":s.hospitalName,13,Ui.INK,false);place.setMaxLines(2);copy.addView(place,u.gap(-2,8));
+        LinearLayout time=u.row();time.setGravity(Gravity.CENTER);time.setPadding(u.dp(8),u.dp(5),u.dp(8),u.dp(5));time.setBackground(u.bg(Color.WHITE,18,0));time.addView(u.icon(s==null?Ui.PLUS:Ui.CLOCK,17,Ui.INK,false));TextView timeText=u.text(s==null?"شروع برنامه‌ریزی":timeRange(s),12,Ui.INK,true);timeText.setPadding(u.dp(6),0,u.dp(6),0);time.addView(timeText);copy.addView(time,u.gap(-2,10));hero.addView(copy,new LinearLayout.LayoutParams(0,-2,1));hero.addView(u.art(R.drawable.hospital_art),new LinearLayout.LayoutParams(u.dp(104),u.dp(145)));hero.setOnClickListener(v->editShift(s,PersianDate.today(),0));p.addView(hero,u.full(178));
+        LinearLayout quick=u.card(Color.WHITE);LinearLayout qhead=u.row();qhead.addView(u.icon(Ui.BOLT,24,Ui.INK,true),new LinearLayout.LayoutParams(u.dp(28),u.dp(28)));qhead.addView(u.text("ثبت سریع",18,Ui.INK,true));quick.addView(qhead);quick.addView(typeTiles(-1,i->editShift(null,PersianDate.today(),i)),u.gap(80,10));p.addView(quick,u.gap(-2,12));
+        LinearLayout listHead=u.row();listHead.addView(u.text("شیفت‌های پیش رو",16,Ui.INK,true),new LinearLayout.LayoutParams(0,-1,1));listHead.addView(u.iconButton(Ui.FILTER,"فیلتر شیفت‌ها",this::filters),new LinearLayout.LayoutParams(u.dp(42),u.dp(48)));p.addView(listHead,u.gap(48,5));
+        p.addView(monthBar(()->showTab(0)),u.full(44));
+        boolean filtered=hospitalFilter>0||typeFilter!=null||paidFilter>=0||filterFrom!=null||filterTo!=null;
+        if(filtered){TextView f=u.text("فیلتر فعال · تغییر یا پاک کردن",12,Ui.PINK,true);f.setPadding(0,u.dp(8),0,u.dp(8));f.setOnClickListener(v->filters());p.addView(f);}
+        PersianDate first=new PersianDate(year,month,1);long from=filterFrom==null?first.atTimeMillis(0,0):filterFrom.atTimeMillis(0,0);long to=filterTo==null?nextMonth(first).atTimeMillis(0,0):filterTo.plusDays(1).atTimeMillis(0,0);
+        List<Shift> list=db.filteredShifts(from,to,hospitalFilter,typeFilter,paidFilter);if(list.isEmpty())empty(p,"هنوز شیفتی برای این بازه نداری",filtered?"فیلترها را تغییر بده یا شیفت تازه‌ای اضافه کن.":"از ثبت سریع یا دکمهٔ پایین شروع کن.");for(Shift item:list)p.addView(shiftRow(item,true),u.gap(-2,8));
     }
-
-    private void quickShift(int type) { pendingQuickType = type; showShiftDialog(null, null); }
-
-    private void confirmDelete(Shift shift) {
-        new AlertDialog.Builder(this).setTitle("حذف شیفت؟").setMessage(shift.typeName() + " در " + shift.hospitalName)
-                .setNegativeButton("نه", null).setPositiveButton("حذف", (d, w) -> {
-                    AlarmScheduler.cancel(this, shift.id); db.deleteShift(shift.id); ShiftWidgetProvider.refresh(this); showTab(0);
-                }).show();
+    View typeTiles(int selectedIndex,Consumer<Integer> click){LinearLayout r=u.row();for(int i=0;i<3;i++){final int index=i;LinearLayout tile=u.col();tile.setGravity(Gravity.CENTER);u.touch(tile,Ui.typeColor(types[i]),13,selectedIndex==i?Ui.typeInk(types[i]):0);tile.addView(u.icon(Ui.typeIcon(types[i]),29,Ui.typeInk(types[i]),true));TextView t=u.text(typeNames[i],14,Ui.INK,true);t.setGravity(Gravity.CENTER);tile.addView(t,u.gap(-2,6));tile.setContentDescription(typeNames[i]);tile.setTag("type"+i);tile.setSelected(selectedIndex==i);tile.setOnClickListener(v->click.accept(index));LinearLayout.LayoutParams lp=u.weight(-1);if(i<2)lp.setMarginEnd(u.dp(9));r.addView(tile,lp);}return r;}
+    View shiftRow(Shift s,boolean date){LinearLayout row=u.row();row.setPadding(u.dp(8),u.dp(7),u.dp(8),u.dp(7));u.touch(row,Color.WHITE,13,Ui.LINE);TextView icon=u.icon(Ui.typeIcon(s.type),27,Ui.typeInk(s.type),true);icon.setBackground(u.bg(Ui.typeColor(s.type),14,0));row.addView(icon,new LinearLayout.LayoutParams(u.dp(46),u.dp(46)));LinearLayout text=u.col();text.setPadding(u.dp(7),0,u.dp(9),0);TextView top=u.text(date?dateText(PersianDate.fromMillis(s.startMillis),false):s.typeName(),13,Ui.INK,true);top.setMaxLines(2);text.addView(top);TextView place=u.text(s.hospitalName,11,Ui.MUTED,false);place.setMaxLines(2);text.addView(place,u.gap(-2,4));row.addView(text,new LinearLayout.LayoutParams(0,-2,1));LinearLayout left=u.col();TextView time=u.text(timeRange(s),11,Ui.INK,true);time.setTextDirection(View.TEXT_DIRECTION_LTR);left.addView(time);if(!PersianDate.fromMillis(s.endMillis).key().equals(s.dateKey)){TextView n=u.text("پایان روز بعد",9,Ui.MUTED,false);n.setGravity(Gravity.CENTER);left.addView(n,u.gap(-2,3));}row.addView(left);row.setTag("shift"+s.id);row.setOnClickListener(v->editShift(s,null,0));return row;}
+    View monthBar(Runnable refresh){LinearLayout bar=u.row();u.touch(bar,Color.WHITE,13,Ui.LINE);bar.addView(u.iconButton(Ui.RIGHT,"ماه بعد",()->{moveMonth(1);refresh.run();}),new LinearLayout.LayoutParams(u.dp(44),u.dp(44)));TextView label=u.text(monthTitle(),14,Ui.INK,true);label.setGravity(Gravity.CENTER);label.setOnClickListener(v->pickDate(new PersianDate(year,month,1),d->{year=d.year;month=d.month;selected=d;refresh.run();}));bar.addView(label,u.weight(44));bar.addView(u.iconButton(Ui.LEFT,"ماه قبل",()->{moveMonth(-1);refresh.run();}),new LinearLayout.LayoutParams(u.dp(44),u.dp(44)));return bar;}
+    void calendar(LinearLayout p){heading(p,"تقویم شمسی",Ui.CALENDAR);p.addView(monthBar(()->showTab(1)),u.full(46));u.gap(p,8);
+        PersianDate first=new PersianDate(year,month,1);if(selected.year!=year||selected.month!=month)selected=first;List<Shift> shifts=db.filteredShifts(first.atTimeMillis(0,0),nextMonth(first).atTimeMillis(0,0),0,null,-1);
+        p.addView(calendarGrid(year,month,selected,shifts,d->{selected=d;showTab(1);}),u.full(-2));
+        LinearLayout legend=u.row();legend.setPadding(0,u.dp(9),0,u.dp(13));for(String s:new String[]{"● امروز","● دارای شیفت","● تعطیل"}){TextView t=u.text(s,10,s.contains("شیفت")?0xff258ace:Ui.PINK,false);t.setGravity(Gravity.CENTER);legend.addView(t,u.weight(24));}p.addView(legend);
+        LinearLayout day=u.card(Color.WHITE);day.addView(u.text(dateText(selected,true),15,Ui.INK,true),u.full(30));String holiday=HolidayRepository.title(selected);if(holiday!=null)day.addView(u.text(holiday,12,Ui.PINK,false),u.gap(-2,4));
+        List<Shift> onDay=db.filteredShifts(selected.atTimeMillis(0,0),selected.plusDays(1).atTimeMillis(0,0),0,null,-1);if(onDay.isEmpty())day.addView(u.text("برای این روز شیفتی ثبت نشده",13,Ui.MUTED,false),u.gap(42,4));for(Shift s:onDay)day.addView(shiftRow(s,false),u.gap(-2,7));day.addView(u.button("افزودن شیفت در این روز",Ui.PLUS,false,()->editShift(null,selected,0)),u.gap(46,10));p.addView(day,u.gap(-2,8));
+        if(year!=1405)p.addView(u.text("تعطیلات قمری این سال هنوز در بانک آفلاین نیست؛ جمعه‌ها و تعطیلات ثابت شمسی نمایش داده می‌شوند.",11,Ui.MUTED,false),u.gap(-2,12));
     }
+    View calendarGrid(int jy,int jm,PersianDate chosen,List<Shift> shifts,Consumer<PersianDate> action){LinearLayout grid=u.col();LinearLayout week=u.row();String[] names={"شنبه","یکشنبه","دوشنبه","سه‌شنبه","چهارشنبه","پنجشنبه","جمعه"};for(int i=0;i<7;i++){TextView t=u.text(names[i],8.5f,i==6?Ui.PINK:Ui.MUTED,false);t.setGravity(Gravity.CENTER);week.addView(t,u.weight(30));}grid.addView(week);int offset=new PersianDate(jy,jm,1).weekdayIndex(),length=PersianDate.monthLength(jy,jm);int rows=(offset+length+6)/7;
+        for(int r=0;r<rows;r++){LinearLayout line=u.row();for(int c=0;c<7;c++){int day=r*7+c-offset+1;LinearLayout cell=u.col();cell.setGravity(Gravity.CENTER);if(day>=1&&day<=length){PersianDate d=new PersianDate(jy,jm,day);boolean today=d.equals(PersianDate.today()),sel=d.equals(chosen);TextView n=u.text(Fa.n(day),16,sel?Color.WHITE:HolidayRepository.isHoliday(d)?Ui.PINK:Ui.INK,sel||today);n.setGravity(Gravity.CENTER);n.setBackground(u.bg(sel?Ui.PINK:today?0xffffe2eb:Color.TRANSPARENT,23,0));cell.addView(n,new LinearLayout.LayoutParams(u.dp(39),u.dp(39)));LinearLayout dots=u.row();dots.setGravity(Gravity.CENTER);Set<String> seen=new HashSet<>();for(Shift s:shifts)if(s.dateKey.equals(d.key()))seen.add(s.type);for(String type:types)if(seen.contains(type)){View dot=new View(this);dot.setBackground(u.bg(Ui.typeInk(type),4,0));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(u.dp(5),u.dp(5));lp.setMargins(u.dp(2),0,u.dp(2),0);dots.addView(dot,lp);}cell.addView(dots,u.full(8));u.touch(cell,Color.TRANSPARENT,18,0);cell.setContentDescription(dateText(d,true)+(HolidayRepository.title(d)==null?"":" "+HolidayRepository.title(d)));cell.setOnClickListener(v->action.accept(d));}line.addView(cell,u.weight(52));}grid.addView(line);}return grid;}
+    void reports(LinearLayout p){heading(p,"گزارش شیفت‌ها",Ui.REPORT);LinearLayout filters=u.row();filters.addView(monthBar(()->showTab(2)),u.weight(44));View hospital=selectButton(reportHospital==0?"همه بیمارستان‌ها":db.hospital(reportHospital).name,()->chooseHospital(true,reportHospital,id->{reportHospital=id;showTab(2);}));LinearLayout.LayoutParams hp=u.weight(44);hp.setMarginStart(u.dp(8));filters.addView(hospital,hp);p.addView(filters,u.full(44));
+        PersianDate first=new PersianDate(year,month,1);List<Shift> shifts=db.filteredShifts(first.atTimeMillis(0,0),nextMonth(first).atTimeMillis(0,0),reportHospital,null,-1);int nights=0;long minutes=0;for(Shift s:shifts){if(s.type.equals(Shift.TYPE_NIGHT))nights++;minutes+=(s.endMillis-s.startMillis)/60000;}long total=db.monthlyTotal(reportHospital,year,month);
+        LinearLayout a=u.row();a.addView(stat("تعداد شیفت‌های شب",Fa.n(nights),"شیفت",Ui.MOON,Ui.LILAC,0xff9265d4),u.weight(102));LinearLayout.LayoutParams gap=u.weight(102);gap.setMarginStart(u.dp(10));a.addView(stat("تعداد کل شیفت‌ها",Fa.n(shifts.size()),"شیفت",Ui.CALENDAR,Ui.MINT,0xff00a58d),gap);p.addView(a,u.gap(102,12));LinearLayout b=u.row();b.addView(stat("درآمد تخمینی",Fa.n(total),"تومان",Ui.COINS,Ui.SKY,0xff288fbd),u.weight(102));LinearLayout.LayoutParams gp=u.weight(102);gp.setMarginStart(u.dp(10));b.addView(stat("مجموع ساعات کار",Fa.n(minutes/60)+(minutes%60==0?"":"٫"+Fa.n(Math.round((minutes%60)/6.0))),"ساعت",Ui.CLOCK,Ui.PEACH,0xffbd783b),gp);p.addView(b,u.gap(102,10));
+        LinearLayout chart=u.card(Color.WHITE);LinearLayout ch=u.row();ch.addView(u.text(chartCount?"شیفت‌های این ماه و پنج ماه آینده":"درآمد این ماه و پنج ماه آینده",13,Ui.INK,true),u.weight(-2));ch.addView(u.iconButton(chartCount?Ui.COINS:Ui.REPORT,"تغییر نمودار درآمد و تعداد شیفت",()->{chartCount=!chartCount;showTab(2);}),new LinearLayout.LayoutParams(u.dp(42),u.dp(38)));chart.addView(ch);long[] values=new long[6];String[] labels=new String[6];PersianDate cursor=first;for(int i=0;i<6;i++){values[i]=chartCount?db.filteredShifts(cursor.atTimeMillis(0,0),nextMonth(cursor).atTimeMillis(0,0),reportHospital,null,-1).size():db.monthlyTotal(reportHospital,cursor.year,cursor.month);labels[i]=PersianDate.MONTHS[cursor.month-1]+"\n"+Fa.n(cursor.year);cursor=nextMonth(cursor);}IncomeChartView plot=new IncomeChartView(this);plot.setData(values,labels,chartCount,u.normal);chart.addView(plot,u.full(164));p.addView(chart,u.gap(-2,12));
+        LinearLayout hospitals=u.card(Color.WHITE);hospitals.addView(u.text("درآمد به تفکیک بیمارستان",14,Ui.INK,true),u.full(30));for(Hospital h:db.hospitals())if(reportHospital==0||reportHospital==h.id){LinearLayout row=u.row();row.addView(u.icon(Ui.LEFT,17,Ui.INK,false));TextView name=u.text(h.name,12,Ui.INK,false);name.setMaxLines(2);row.addView(name,u.weight(48));row.addView(u.text(Fa.money(db.monthlyTotal(h.id,year,month)),11,Ui.INK,true));row.setOnClickListener(v->incomeDetail(h));hospitals.addView(row);hospitals.addView(u.line(),u.full(1));}if(db.hospitals().isEmpty())hospitals.addView(u.text("اول یک بیمارستان تعریف کن",13,Ui.MUTED,false),u.full(42));p.addView(hospitals,u.gap(-2,10));p.addView(u.text("تخمین = حقوق پایهٔ ماهانه + مبلغ شیفت‌های ثبت‌شده؛ بر اساس ماهِ شروع شیفت. مبلغ‌ها تومان‌اند و کسورات لحاظ نمی‌شود.",10,Ui.MUTED,false),u.gap(-2,10));}
+    View stat(String title,String value,String unit,String icon,int color,int ink){LinearLayout card=u.card(color);card.setPadding(u.dp(10),u.dp(10),u.dp(10),u.dp(9));TextView t=u.text(title,10.5f,Ui.INK,false);t.setGravity(Gravity.RIGHT);card.addView(t);LinearLayout row=u.row();LinearLayout numbers=u.col();numbers.setGravity(Gravity.CENTER);TextView n=u.text(value,value.length()>7?20:25,Ui.INK,true);n.setGravity(Gravity.CENTER);numbers.addView(n);TextView label=u.text(unit,11,Ui.INK,false);label.setGravity(Gravity.CENTER);numbers.addView(label);row.addView(numbers,u.weight(-2));row.addView(u.icon(icon,31,ink,true),new LinearLayout.LayoutParams(u.dp(34),u.dp(48)));card.addView(row,u.gap(-2,6));return card;}
+    void incomeDetail(Hospital h){long shifts=db.monthlyShiftIncome(h.id,year,month);new AlertDialog.Builder(this).setTitle(h.name+" · "+monthTitle()).setMessage("حقوق پایه: "+Fa.money(h.baseSalary)+"\nمجموع شیفت‌ها: "+Fa.money(shifts)+"\nجمع تخمینی: "+Fa.money(h.baseSalary+shifts)+"\n\nتغییر تعرفهٔ بیمارستان، تخمین شیفت‌های بدون مبلغ اختصاصی را نیز تغییر می‌دهد.").setPositiveButton("فهمیدم",null).show();}
+    void hospitals(LinearLayout p){heading(p,"بیمارستان‌های من",Ui.HOSPITAL);p.addView(u.button("افزودن بیمارستان",Ui.PLUS,true,()->editHospital(null,null)),u.full(50));List<Hospital> list=db.hospitals();if(list.isEmpty())empty(p,"اولین بیمارستانت را بساز","نام، بخش و تعرفهٔ شیفت را وارد کن تا ثبت شیفت سریع‌تر شود.");for(Hospital h:list){LinearLayout c=u.card(Color.WHITE);LinearLayout head=u.row();head.addView(u.icon(Ui.HOSPITAL,30,Ui.PINK,true),new LinearLayout.LayoutParams(u.dp(44),u.dp(44)));LinearLayout name=u.col();name.addView(u.text(h.name,17,Ui.INK,true));if(!h.ward.isEmpty())name.addView(u.text(h.ward,12,Ui.MUTED,false));head.addView(name,u.weight(-2));head.addView(u.icon(Ui.LEFT,20,Ui.MUTED,false));c.addView(head);c.addView(u.text("حقوق پایهٔ ماهانه: "+Fa.money(h.baseSalary),13,Ui.INK,false),u.gap(-2,10));LinearLayout rates=u.row();for(int i=0;i<3;i++){LinearLayout rate=u.col();rate.setGravity(Gravity.CENTER);rate.addView(u.icon(Ui.typeIcon(types[i]),23,Ui.typeInk(types[i]),true));TextView text=u.text(typeNames[i]+"\n"+Fa.n(h.rateFor(types[i])),11,Ui.INK,false);text.setGravity(Gravity.CENTER);rate.addView(text);rates.addView(rate,u.weight(70));}c.addView(rates,u.gap(-2,8));c.setOnClickListener(v->editHospital(h,null));p.addView(c,u.gap(-2,12));}p.addView(u.button("تنظیمات یادآوری و راهنما",Ui.GEAR,false,this::settings),u.gap(48,18));}
+    void empty(LinearLayout p,String title,String subtitle){LinearLayout e=u.col();e.setGravity(Gravity.CENTER);e.setPadding(u.dp(16),u.dp(20),u.dp(16),u.dp(20));TextView a=u.text(title,15,Ui.INK,true);a.setGravity(Gravity.CENTER);e.addView(a);TextView b=u.text(subtitle,12,Ui.MUTED,false);b.setGravity(Gravity.CENTER);e.addView(b,u.gap(-2,9));p.addView(e,u.full(-2));}
 
-    private View calendarPage() {
-        ScrollView scroll = new ScrollView(this);
-        LinearLayout root = column();
-        root.setPadding(dp(14), dp(4), dp(14), dp(24));
-        scroll.addView(root);
-
-        LinearLayout monthBar = row();
-        Button next = smallButton("ماه بعد");
-        TextView title = heading(monthTitle(), 20);
-        title.setGravity(Gravity.CENTER);
-        Button previous = smallButton("ماه قبل");
-        monthBar.addView(next);
-        monthBar.addView(title, weight());
-        monthBar.addView(previous);
-        root.addView(monthBar);
-        next.setOnClickListener(v -> { moveMonth(1); showTab(1); });
-        previous.setOnClickListener(v -> { moveMonth(-1); showTab(1); });
-
-        GridLayout grid = new GridLayout(this);
-        grid.setColumnCount(7);
-        grid.setAlignmentMode(GridLayout.ALIGN_BOUNDS);
-        for (String day : new String[]{"ش", "ی", "د", "س", "چ", "پ", "ج"}) {
-            TextView h = label(day, 13, true);
-            h.setGravity(Gravity.CENTER);
-            h.setTextColor(day.equals("ج") ? getColor(R.color.danger) : getColor(R.color.muted));
-            grid.addView(h, gridCell());
-        }
-        PersianDate first = new PersianDate(viewYear, viewMonth, 1);
-        for (int i = 0; i < first.weekdayIndex(); i++) grid.addView(new TextView(this), gridCell());
-        List<Shift> monthShifts = db.filteredShifts(first.atTimeMillis(0, 0), nextMonth(first).atTimeMillis(0, 0), 0, null, -1);
-        for (int day = 1; day <= PersianDate.monthLength(viewYear, viewMonth); day++) {
-            PersianDate date = new PersianDate(viewYear, viewMonth, day);
-            int count = 0;
-            for (Shift s : monthShifts) if (s.dateKey.equals(date.key())) count++;
-            String holiday = HolidayRepository.title(date);
-            Button cell = new Button(this);
-            cell.setAllCaps(false);
-            cell.setMinHeight(0); cell.setMinWidth(0);
-            cell.setPadding(2, 2, 2, 2);
-            cell.setText(Fa.n(day) + (count > 0 ? "\n● " + Fa.n(count) : ""));
-            cell.setTextSize(13);
-            cell.setTextColor(HolidayRepository.isHoliday(date) ? getColor(R.color.danger) : getColor(R.color.ink));
-            cell.setBackgroundResource(R.drawable.bg_chip);
-            cell.setContentDescription(date.longText() + (holiday == null ? "" : "، " + holiday));
-            cell.setOnClickListener(v -> showDay(date));
-            grid.addView(cell, gridCell());
-        }
-        root.addView(grid, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        TextView info = label("روزهای قرمز تعطیل رسمی یا جمعه‌اند. روی هر روز بزن تا شیفت‌ها و عنوان تعطیلی را ببینی.", 13, false);
-        info.setTextColor(getColor(R.color.muted));
-        info.setPadding(4, dp(14), 4, 4);
-        root.addView(info);
-        return scroll;
+    Dialog sheet(String title,LinearLayout form){Dialog d=new Dialog(this);d.requestWindowFeature(Window.FEATURE_NO_TITLE);LinearLayout shell=u.col();shell.setPadding(u.dp(16),u.dp(10),u.dp(16),u.dp(16));shell.setBackground(u.bg(Ui.BG,26,0));View handle=new View(this);handle.setBackground(u.bg(0xffc1c2c4,5,0));LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(u.dp(38),u.dp(4));hp.gravity=Gravity.CENTER;hp.bottomMargin=u.dp(10);shell.addView(handle,hp);LinearLayout top=u.row();top.addView(u.art(R.drawable.peach_nurse),new LinearLayout.LayoutParams(u.dp(58),u.dp(58)));TextView heading=u.text(title,20,Ui.INK,true);heading.setGravity(Gravity.CENTER);top.addView(heading,u.weight(58));top.addView(u.iconButton(Ui.CLOSE,"بستن",d::dismiss),new LinearLayout.LayoutParams(u.dp(48),u.dp(48)));shell.addView(top);ScrollView scroll=new ScrollView(this);scroll.setFillViewport(false);scroll.addView(form);shell.addView(scroll,u.full(-2));d.setContentView(shell);Window w=d.getWindow();w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));w.setGravity(Gravity.BOTTOM);w.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);w.setDimAmount(.36f);w.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);d.setOnDismissListener(v->{if(activeSheet==d)activeSheet=null;});d.show();w.setLayout(-1,-2);int max=(int)(getResources().getDisplayMetrics().heightPixels*.85);shell.setOnApplyWindowInsetsListener((v,insets)->{if(Build.VERSION.SDK_INT>=30){android.graphics.Insets bars=insets.getInsets(WindowInsets.Type.systemBars());shell.setPadding(u.dp(16),u.dp(10),u.dp(16),u.dp(16)+bars.bottom);}return insets;});shell.post(()->{if(shell.getHeight()>max)w.setLayout(-1,max);});activeSheet=d;return d;}
+    View selectButton(String label,Runnable action){LinearLayout b=u.row();b.setPadding(u.dp(10),0,u.dp(8),0);u.touch(b,Color.WHITE,12,Ui.LINE);TextView t=u.text(label,12,Ui.INK,true);t.setMaxLines(2);b.addView(t,u.weight(46));b.addView(u.icon(Ui.DOWN,17,Ui.INK,false));b.setOnClickListener(v->action.run());b.setContentDescription(label);return b;}
+    void chooseHospital(boolean all,long current,Consumer<Long> chosen){List<Hospital> list=db.hospitals();String[] labels=new String[list.size()+(all?1:0)];if(all)labels[0]="همه بیمارستان‌ها";int select=all?0:-1;for(int i=0;i<list.size();i++){labels[i+(all?1:0)]=list.get(i).name;if(list.get(i).id==current)select=i+(all?1:0);}new AlertDialog.Builder(this).setTitle("انتخاب بیمارستان").setSingleChoiceItems(labels,select,(d,w)->{chosen.accept(all&&w==0?0L:list.get(w-(all?1:0)).id);d.dismiss();}).setNegativeButton("انصراف",null).show();}
+    void editShift(Shift existing,PersianDate date,int quick){
+        List<Hospital> hs=db.hospitals();if(hs.isEmpty()){new AlertDialog.Builder(this).setTitle("اول بیمارستان را تعریف کن").setMessage("شیفت‌ها به بیمارستان وصل می‌شوند تا محل کار و درآمدت مشخص باشد.").setPositiveButton("تعریف بیمارستان",(d,w)->editHospital(null,()->editShift(null,date,quick))).setNegativeButton("بعداً",null).show();return;}
+        Shift draft=existing==null?new Shift():db.shift(existing.id);if(draft==null)return;final PersianDate[] when={date==null?PersianDate.today():date};final int[] type={quick},hours={7,0,15,0};final long[] hospital={hs.get(0).id};
+        if(existing!=null){when[0]=PersianDate.fromMillis(draft.startMillis);type[0]=Arrays.asList(types).indexOf(draft.type);hospital[0]=draft.hospitalId;ZonedDateTime a=Instant.ofEpochMilli(draft.startMillis).atZone(ZoneId.systemDefault()),b=Instant.ofEpochMilli(draft.endMillis).atZone(ZoneId.systemDefault());hours[0]=a.getHour();hours[1]=a.getMinute();hours[2]=b.getHour();hours[3]=b.getMinute();}else setDefaultTimes(type[0],hours);
+        LinearLayout form=u.col();final Dialog[] dialog={null};LinearLayout hospitalBox=u.col();refreshHospitalBox(hospitalBox,hospital);u.field(form,"بیمارستان",hospitalBox);
+        LinearLayout tiles=u.col();final TextView start=timeField(hours[0],hours[1]),end=timeField(hours[2],hours[3]);Runnable redrawTimes=()->{start.setText(Fa.time(hours[0],hours[1]));end.setText(Fa.time(hours[2],hours[3]));};Consumer<Integer> chooseType=new Consumer<Integer>(){public void accept(Integer i){type[0]=i;setDefaultTimes(i,hours);redrawTimes.run();tiles.removeAllViews();tiles.addView(typeTiles(i,this),u.full(76));}};tiles.addView(typeTiles(type[0],chooseType),u.full(76));u.field(form,"نوع شیفت",tiles);
+        TextView dateButton=fieldButton(dateText(when[0],true));dateButton.setTag("shiftDate");dateButton.setOnClickListener(v->pickDate(when[0],d->{when[0]=d;dateButton.setText(dateText(d,true));}));u.field(form,"تاریخ (شمسی)",dateButton);
+        LinearLayout times=u.row();LinearLayout from=u.col(),to=u.col();u.field(from,"ساعت شروع",start);u.field(to,"ساعت پایان",end);times.addView(from,u.weight(-2));LinearLayout.LayoutParams tg=u.weight(-2);tg.setMarginStart(u.dp(10));times.addView(to,tg);form.addView(times);start.setTag("startTime");end.setTag("endTime");start.setOnClickListener(v->new TimePickerDialog(this,(picker,h,m)->{hours[0]=h;hours[1]=m;redrawTimes.run();},hours[0],hours[1],true).show());end.setOnClickListener(v->new TimePickerDialog(this,(picker,h,m)->{hours[2]=h;hours[3]=m;redrawTimes.run();},hours[2],hours[3],true).show());
+        LinearLayout amounts=u.row(),amountCol=u.col(),reminderCol=u.col();EditText amount=u.input(draft.customAmount==0?"":Fa.n(draft.customAmount),"خودکار · تومان",true);amount.setTag("shiftAmount");u.field(amountCol,"مبلغ اختصاصی (تومان)",amount);
+        final int[] reminder={draft.alarmEnabled?draft.reminderMinutes:-1};TextView reminderButton=fieldButton(reminderText(reminder[0]));reminderButton.setTag("reminder");reminderButton.setOnClickListener(v->{String[] choices={"خاموش","زمان شروع","۱۵ دقیقه قبل","۳۰ دقیقه قبل","۱ ساعت قبل","۲ ساعت قبل"};int[] values={-1,0,15,30,60,120};new AlertDialog.Builder(this).setTitle("یادآوری با زنگ گوشی").setItems(choices,(d,w)->{reminder[0]=values[w];reminderButton.setText(reminderText(reminder[0]));}).show();});u.field(reminderCol,"یادآوری",reminderButton);amounts.addView(amountCol,u.weight(-2));LinearLayout.LayoutParams ag=u.weight(-2);ag.setMarginStart(u.dp(10));amounts.addView(reminderCol,ag);form.addView(amounts);
+        CheckBox paid=new CheckBox(this);paid.setTypeface(u.normal);paid.setText("دریافت شده است");paid.setTextSize(13);paid.setTextColor(Ui.INK);paid.setChecked(draft.paid);paid.setButtonTintList(android.content.res.ColorStateList.valueOf(Ui.INK));form.addView(paid,u.full(46));
+        EditText note=u.input(draft.note,"مثلاً بخش، توضیحات و ...",false);note.setSingleLine(false);note.setMinLines(2);note.setMaxLines(4);note.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE);note.setTag("shiftNote");u.field(form,"یادداشت (اختیاری)",note);
+        LinearLayout save=u.button("بررسی و ذخیره",Ui.CHECK,true,()->{try{long custom=parseAmount(amount);PersianDate day=when[0];long begin=day.atTimeMillis(hours[0],hours[1]);boolean overnight=hours[2]*60+hours[3]<hours[0]*60+hours[1];if(hours[0]==hours[2]&&hours[1]==hours[3]){toast("ساعت شروع و پایان نباید یکسان باشد");return;}long finish=(overnight?day.plusDays(1):day).atTimeMillis(hours[2],hours[3]);List<Shift> overlaps=db.conflicts(draft.id,begin,finish);if(!overlaps.isEmpty()){StringBuilder message=new StringBuilder("این زمان با شیفت‌های زیر تداخل دارد:\n");for(Shift conflict:overlaps)message.append("\n").append(conflict.typeName()).append(" · ").append(conflict.hospitalName).append("\n").append(dateText(PersianDate.fromMillis(conflict.startMillis),true)).append(" · ").append(timeRange(conflict)).append("\n");new AlertDialog.Builder(this).setTitle("تداخل شیفت").setMessage(message.toString()).setPositiveButton("اصلاح زمان",null).show();return;}if(reminder[0]>=0&&begin-reminder[0]*60000L<=System.currentTimeMillis()){toast("زمان یادآوری گذشته است؛ تاریخ را تغییر بده یا یادآوری را خاموش کن");return;}draft.hospitalId=hospital[0];draft.type=types[type[0]];draft.dateKey=day.key();draft.startMillis=begin;draft.endMillis=finish;draft.customAmount=custom;draft.reminderMinutes=Math.max(0,reminder[0]);draft.alarmEnabled=reminder[0]>=0;draft.paid=paid.isChecked();draft.note=note.getText().toString();draft.id=db.saveShift(draft);AlarmScheduler.schedule(this,draft);ShiftWidgetProvider.refresh(this);dialog[0].dismiss();year=day.year;month=day.month;selected=day;showTab(tab);toast("شیفت ذخیره شد");if(draft.alarmEnabled)reminderPermissions();}catch(IllegalArgumentException ex){amount.setError(ex.getMessage());amount.requestFocus();}});save.setTag("saveShift");form.addView(save,u.gap(52,14));
+        if(existing!=null)form.addView(u.button("حذف این شیفت",Ui.TRASH,false,()->new AlertDialog.Builder(this).setTitle("این شیفت حذف شود؟").setMessage(draft.hospitalName+" · "+dateText(when[0],true)).setNegativeButton("انصراف",null).setPositiveButton("حذف",(d,w)->{AlarmScheduler.cancel(this,draft.id);db.deleteShift(draft.id);ShiftWidgetProvider.refresh(this);dialog[0].dismiss();showTab(tab);toast("شیفت حذف شد؛ بازیابی خودکار ندارد");}).show()),u.gap(48,10));dialog[0]=sheet(existing==null?"شیفت تازه":"ویرایش شیفت",form);
     }
-
-    private void showDay(PersianDate date) {
-        long from = date.atTimeMillis(0, 0);
-        long to = date.plusDays(1).atTimeMillis(0, 0);
-        List<Shift> shifts = db.filteredShifts(from, to, 0, null, -1);
-        StringBuilder text = new StringBuilder();
-        String holiday = HolidayRepository.title(date);
-        if (holiday != null) text.append("تعطیل رسمی: ").append(holiday).append("\n\n");
-        if (date.isFriday() && holiday == null) text.append("تعطیل هفتگی جمعه\n\n");
-        if (shifts.isEmpty()) text.append("شیفتی برای این روز ثبت نشده.");
-        for (Shift s : shifts) text.append("• ").append(s.typeName()).append(" در ").append(s.hospitalName)
-                .append("، ").append(timeRange(s)).append("\n");
-        new AlertDialog.Builder(this).setTitle(date.longText()).setMessage(text.toString())
-                .setNegativeButton("بستن", null)
-                .setPositiveButton("افزودن شیفت", (d, w) -> showShiftDialog(null, date)).show();
-    }
-
-    private View hospitalsPage() {
-        ScrollView scroll = new ScrollView(this);
-        LinearLayout root = column();
-        root.setPadding(dp(14), dp(4), dp(14), dp(24));
-        LinearLayout bar = row();
-        bar.addView(heading("بیمارستان‌های من", 20), weight());
-        Button add = smallButton("+ بیمارستان");
-        add.setBackgroundResource(R.drawable.bg_primary);
-        add.setTextColor(Color.WHITE);
-        bar.addView(add);
-        root.addView(bar);
-        add.setOnClickListener(v -> showHospitalDialog(null));
-
-        List<Hospital> hospitals = db.hospitals();
-        if (hospitals.isEmpty()) {
-            TextView empty = label("اولین بیمارستان را بساز؛ حقوق پایه و نرخ روزکار، عصرکار و شب‌کار همین‌جا تعریف می‌شود.", 16, false);
-            empty.setBackgroundResource(R.drawable.bg_card);
-            empty.setPadding(dp(18), dp(24), dp(18), dp(24));
-            root.addView(empty, marginTop(14));
-        }
-        for (Hospital h : hospitals) {
-            LinearLayout card = column();
-            card.setBackgroundResource(R.drawable.bg_card);
-            card.setPadding(dp(16), dp(14), dp(16), dp(14));
-            TextView name = heading(h.name + (h.ward.isEmpty() ? "" : " • " + h.ward), 18);
-            card.addView(name);
-            card.addView(label("حقوق پایه: " + Fa.money(h.baseSalary), 14, false));
-            card.addView(label("روزکار " + Fa.money(h.dayRate) + "  |  عصرکار " + Fa.money(h.eveningRate) + "  |  شب‌کار " + Fa.money(h.nightRate), 13, false));
-            Button edit = smallButton("ویرایش نرخ‌ها");
-            edit.setOnClickListener(v -> showHospitalDialog(h));
-            card.addView(edit, marginTop(8));
-            root.addView(card, marginTop(10));
-        }
-        scroll.addView(root);
-        return scroll;
-    }
-
-    private View reportPage() {
-        ScrollView scroll = new ScrollView(this);
-        LinearLayout root = column();
-        root.setPadding(dp(14), dp(4), dp(14), dp(24));
-
-        LinearLayout monthBar = row();
-        Button next = smallButton("ماه بعد");
-        TextView title = heading("گزارش " + monthTitle(), 20);
-        title.setGravity(Gravity.CENTER);
-        Button previous = smallButton("ماه قبل");
-        monthBar.addView(next); monthBar.addView(title, weight()); monthBar.addView(previous);
-        root.addView(monthBar);
-        next.setOnClickListener(v -> { moveMonth(1); showTab(2); });
-        previous.setOnClickListener(v -> { moveMonth(-1); showTab(2); });
-
-        List<Hospital> hospitals = db.hospitals();
-        Spinner hospitalFilter = spinner(hospitalNames(hospitals, true));
-        root.addView(hospitalFilter, marginTop(10));
-
-        LinearLayout dynamic = column();
-        root.addView(dynamic);
-        Runnable refresh = () -> {
-            dynamic.removeAllViews();
-            long selected = hospitalFilter.getSelectedItemPosition() <= 0 ? 0 : hospitals.get(hospitalFilter.getSelectedItemPosition() - 1).id;
-            PersianDate first = new PersianDate(viewYear, viewMonth, 1);
-            List<Shift> current = db.filteredShifts(first.atTimeMillis(0, 0), nextMonth(first).atTimeMillis(0, 0), selected, null, -1);
-            long total = db.monthlyTotal(selected, viewYear, viewMonth);
-            TextView big = heading("حقوق تقریبی: " + Fa.money(total), 23);
-            big.setTextColor(getColor(R.color.peach_dark));
-            big.setBackgroundResource(R.drawable.bg_card);
-            big.setPadding(dp(18), dp(18), dp(18), dp(18));
-            dynamic.addView(big, marginTop(10));
-            dynamic.addView(label("تعداد شیفت‌ها: " + Fa.n(current.size()) + "  •  جمع نرخ شیفت‌ها: " + Fa.money(shiftIncome(current)), 15, false), marginTop(8));
-
-            for (Hospital h : hospitals) {
-                if (selected > 0 && h.id != selected) continue;
-                long shiftPay = db.monthlyShiftIncome(h.id, viewYear, viewMonth);
-                long hospitalTotal = h.baseSalary + shiftPay;
-                TextView row = label(h.name + "\nحقوق پایه " + Fa.money(h.baseSalary) + " + شیفت‌ها " + Fa.money(shiftPay) + " = " + Fa.money(hospitalTotal), 15, true);
-                row.setBackgroundResource(R.drawable.bg_card);
-                row.setPadding(dp(14), dp(12), dp(14), dp(12));
-                dynamic.addView(row, marginTop(8));
-            }
-
-            dynamic.addView(heading("نمودار شش ماه از ماه انتخاب‌شده", 17), marginTop(18));
-            IncomeChartView chart = new IncomeChartView(this);
-            chart.setBackgroundResource(R.drawable.bg_card);
-            long[] incomes = new long[6]; int[] counts = new int[6]; String[] labels = new String[6];
-            PersianDate cursor = first;
-            for (int i = 0; i < 6; i++) {
-                PersianDate end = nextMonth(cursor);
-                List<Shift> shifts = db.filteredShifts(cursor.atTimeMillis(0,0), end.atTimeMillis(0,0), selected, null, -1);
-                incomes[i] = db.monthlyTotal(selected, cursor.year, cursor.month);
-                counts[i] = shifts.size();
-                labels[i] = PersianDate.MONTHS[cursor.month - 1];
-                cursor = end;
-            }
-            chart.setData(incomes, counts, labels);
-            dynamic.addView(chart, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(260)));
-        };
-        hospitalFilter.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) { refresh.run(); }
-            @Override public void onNothingSelected(AdapterView<?> parent) {}
-        });
-        refresh.run();
-        scroll.addView(root);
-        return scroll;
-    }
-
-    private long shiftIncome(List<Shift> rows) {
-        long total = 0;
-        for (Shift s : rows) total += db.estimatedAmount(s);
-        return total;
-    }
-
-    private void showHospitalDialog(Hospital existing) {
-        Hospital hospital = existing == null ? new Hospital() : existing;
-        LinearLayout form = form();
-        EditText name = input("نام بیمارستان", hospital.name, false);
-        EditText ward = input("بخش یا توضیح کوتاه", hospital.ward, false);
-        EditText base = input("حقوق پایه ماهانه (تومان)", Long.toString(hospital.baseSalary), true);
-        EditText day = input("نرخ تقریبی روزکار", Long.toString(hospital.dayRate), true);
-        EditText evening = input("نرخ تقریبی عصرکار", Long.toString(hospital.eveningRate), true);
-        EditText night = input("نرخ تقریبی شب‌کار", Long.toString(hospital.nightRate), true);
-        form.addView(name); form.addView(ward); form.addView(base); form.addView(day); form.addView(evening); form.addView(night);
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(existing == null ? "بیمارستان تازه" : "ویرایش بیمارستان")
-                .setView(form).setNegativeButton("انصراف", null).setPositiveButton("ذخیره", null).create();
-        dialog.setOnShowListener(x -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            if (name.getText().toString().trim().isEmpty()) { name.setError("نام بیمارستان لازم است"); return; }
-            hospital.name = name.getText().toString().trim();
-            hospital.ward = ward.getText().toString().trim();
-            hospital.baseSalary = number(base);
-            hospital.dayRate = number(day);
-            hospital.eveningRate = number(evening);
-            hospital.nightRate = number(night);
-            db.saveHospital(hospital);
-            dialog.dismiss();
-            showTab(3);
-        }));
-        dialog.show();
-    }
-
-    private void showShiftDialog(Shift existing, PersianDate presetDate) {
-        List<Hospital> hospitals = db.hospitals();
-        if (hospitals.isEmpty()) {
-            new AlertDialog.Builder(this).setTitle("اول بیمارستان را بساز")
-                    .setMessage("برای ثبت شیفت باید حداقل یک بیمارستان همراه نرخ‌های تقریبی داشته باشی.")
-                    .setNegativeButton("بعداً", null)
-                    .setPositiveButton("ساخت بیمارستان", (d, w) -> showHospitalDialog(null)).show();
-            return;
-        }
-        Shift shift = existing == null ? new Shift() : existing;
-        PersianDate date = existing == null ? (presetDate == null ? PersianDate.today() : presetDate) : PersianDate.parse(existing.dateKey);
-        LinearLayout form = form();
-        Spinner hospital = spinner(hospitalNames(hospitals, false));
-        Spinner type = spinner(new String[]{"روزکار", "عصرکار", "شب‌کار"});
-        Spinner year = spinner(range(date.year - 1, date.year + 3));
-        Spinner month = spinner(PersianDate.MONTHS);
-        Spinner day = spinner(days(date.year, date.month));
-        year.setSelection(1); month.setSelection(date.month - 1); day.setSelection(date.day - 1);
-        if (existing != null) {
-            for (int i = 0; i < hospitals.size(); i++) if (hospitals.get(i).id == existing.hospitalId) hospital.setSelection(i);
-            type.setSelection(existing.type.equals(Shift.TYPE_EVENING) ? 1 : existing.type.equals(Shift.TYPE_NIGHT) ? 2 : 0);
-        }
-
-        LinearLayout dateRow = row(); dateRow.addView(year, weight()); dateRow.addView(month, weight()); dateRow.addView(day, weight());
-        Spinner startHour = spinner(range(0, 23)); Spinner startMinute = spinner(new String[]{"۰۰", "۱۵", "۳۰", "۴۵"});
-        Spinner endHour = spinner(range(0, 23)); Spinner endMinute = spinner(new String[]{"۰۰", "۱۵", "۳۰", "۴۵"});
-        int sh = 7, sm = 0, eh = 15, em = 0;
-        if (existing != null) {
-            java.time.ZonedDateTime st = Instant.ofEpochMilli(existing.startMillis).atZone(ZoneId.systemDefault());
-            java.time.ZonedDateTime et = Instant.ofEpochMilli(existing.endMillis).atZone(ZoneId.systemDefault());
-            sh = st.getHour(); sm = st.getMinute(); eh = et.getHour(); em = et.getMinute();
-        }
-        startHour.setSelection(sh); startMinute.setSelection(sm / 15); endHour.setSelection(eh); endMinute.setSelection(em / 15);
-        LinearLayout timeRow = row();
-        timeRow.addView(label("از", 14, true)); timeRow.addView(startHour, weight()); timeRow.addView(startMinute, weight());
-        timeRow.addView(label("تا", 14, true)); timeRow.addView(endHour, weight()); timeRow.addView(endMinute, weight());
-        EditText amount = input("مبلغ این شیفت؛ خالی = نرخ بیمارستان", existing == null || existing.customAmount == 0 ? "" : Long.toString(existing.customAmount), true);
-        Spinner reminder = spinner(new String[]{"بدون زنگ", "هنگام شروع", "۳۰ دقیقه قبل", "۶۰ دقیقه قبل", "۱۲۰ دقیقه قبل"});
-        if (existing != null && existing.alarmEnabled) reminder.setSelection(existing.reminderMinutes == 0 ? 1 : existing.reminderMinutes == 30 ? 2 : existing.reminderMinutes == 60 ? 3 : 4);
-        CheckBox paid = new CheckBox(this); paid.setText("پرداخت شده"); paid.setChecked(existing != null && existing.paid);
-        EditText note = input("یادداشت", existing == null ? "" : existing.note, false);
-        form.addView(label("بیمارستان", 13, true)); form.addView(hospital);
-        form.addView(label("نوع شیفت", 13, true)); form.addView(type);
-        form.addView(label("تاریخ شمسی", 13, true)); form.addView(dateRow);
-        form.addView(label("ساعت شروع و پایان", 13, true)); form.addView(timeRow);
-        form.addView(amount); form.addView(reminder); form.addView(paid); form.addView(note);
-
-        AdapterView.OnItemSelectedListener dateChanged = new AdapterView.OnItemSelectedListener() {
-            @Override public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
-                int y = date.year - 1 + year.getSelectedItemPosition();
-                int m = month.getSelectedItemPosition() + 1;
-                int old = day.getSelectedItemPosition();
-                day.setAdapter(new ArrayAdapter<>(MainActivity.this, android.R.layout.simple_spinner_dropdown_item, days(y, m)));
-                day.setSelection(Math.min(old, PersianDate.monthLength(y, m) - 1));
-            }
-            @Override public void onNothingSelected(AdapterView<?> p) {}
-        };
-        year.setOnItemSelectedListener(dateChanged); month.setOnItemSelectedListener(dateChanged);
-        type.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
-                if (existing != null) return;
-                if (pos == 0) { startHour.setSelection(7); endHour.setSelection(15); }
-                else if (pos == 1) { startHour.setSelection(15); endHour.setSelection(23); }
-                else { startHour.setSelection(19); endHour.setSelection(7); }
-            }
-            @Override public void onNothingSelected(AdapterView<?> p) {}
-        });
-        if (existing == null && pendingQuickType >= 0) {
-            int quick = pendingQuickType;
-            pendingQuickType = -1;
-            type.setSelection(quick);
-        }
-
-        ScrollView wrapper = new ScrollView(this); wrapper.addView(form);
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(existing == null ? "شیفت تازه" : "ویرایش شیفت")
-                .setView(wrapper).setNegativeButton("انصراف", null).setPositiveButton("بررسی و ذخیره", null).create();
-        dialog.setOnShowListener(x -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            int y = date.year - 1 + year.getSelectedItemPosition();
-            int m = month.getSelectedItemPosition() + 1;
-            int d = day.getSelectedItemPosition() + 1;
-            PersianDate chosen = new PersianDate(y, m, d);
-            int startH = startHour.getSelectedItemPosition(), startM = startMinute.getSelectedItemPosition() * 15;
-            int endH = endHour.getSelectedItemPosition(), endM = endMinute.getSelectedItemPosition() * 15;
-            shift.hospitalId = hospitals.get(hospital.getSelectedItemPosition()).id;
-            shift.hospitalName = hospitals.get(hospital.getSelectedItemPosition()).name;
-            shift.type = typeCode(type.getSelectedItemPosition() + 1);
-            shift.dateKey = chosen.key();
-            shift.startMillis = chosen.atTimeMillis(startH, startM);
-            shift.endMillis = chosen.atTimeMillis(endH, endM);
-            if (shift.endMillis <= shift.startMillis) shift.endMillis = chosen.plusDays(1).atTimeMillis(endH, endM);
-            shift.customAmount = number(amount);
-            int rp = reminder.getSelectedItemPosition();
-            shift.alarmEnabled = rp > 0;
-            shift.reminderMinutes = rp <= 1 ? 0 : rp == 2 ? 30 : rp == 3 ? 60 : 120;
-            shift.paid = paid.isChecked();
-            shift.note = note.getText().toString();
-            List<Shift> conflicts = db.conflicts(shift.id, shift.startMillis, shift.endMillis);
-            if (!conflicts.isEmpty()) {
-                Shift c = conflicts.get(0);
-                String message = "این شیفت با «" + c.typeName() + "» در بیمارستان «" + c.hospitalName + "» تداخل دارد.\n\n" +
-                        PersianDate.fromMillis(c.startMillis).longText() + "، " + timeRange(c) + "\n\nبا این حال ذخیره شود؟";
-                new AlertDialog.Builder(this).setTitle("تداخل دقیق پیدا شد")
-                        .setMessage(message).setNegativeButton("اصلاح می‌کنم", null)
-                        .setPositiveButton("ذخیره با تداخل", (dd, ww) -> { persistShift(shift); dialog.dismiss(); }).show();
-            } else {
-                persistShift(shift); dialog.dismiss();
-            }
-        }));
-        dialog.show();
-    }
-
-    private void persistShift(Shift shift) {
-        shift.id = db.saveShift(shift);
-        if (shift.alarmEnabled) ensureExactAlarmPermission();
-        AlarmScheduler.schedule(this, shift);
-        ShiftWidgetProvider.refresh(this);
-        Toast.makeText(this, "شیفت ذخیره شد", Toast.LENGTH_SHORT).show();
-        showTab(activeTab);
-    }
-
-    private void ensureExactAlarmPermission() {
-        if (Build.VERSION.SDK_INT >= 31) {
-            AlarmManager am = (AlarmManager) getSystemService(ALARM_SERVICE);
-            if (!am.canScheduleExactAlarms()) {
-                try { startActivity(new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:" + getPackageName()))); }
-                catch (Exception ignored) {}
-            }
-        }
-    }
-
-    private void requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 41);
-        }
-    }
-
-    private final class ShiftAdapter extends BaseAdapter {
-        private final List<Shift> rows;
-        ShiftAdapter(List<Shift> rows) { this.rows = rows; }
-        @Override public int getCount() { return rows.size(); }
-        @Override public Object getItem(int position) { return rows.get(position); }
-        @Override public long getItemId(int position) { return rows.get(position).id; }
-        @Override public View getView(int position, View convert, ViewGroup parent) {
-            View view = convert == null ? LayoutInflater.from(MainActivity.this).inflate(R.layout.item_shift, parent, false) : convert;
-            Shift shift = rows.get(position);
-            PersianDate date = PersianDate.fromMillis(shift.startMillis);
-            boolean newDay = position == 0 || !rows.get(position - 1).dateKey.equals(shift.dateKey);
-            String holiday = HolidayRepository.title(date);
-            ((TextView) view.findViewById(R.id.shiftType)).setText((newDay ? date.longText() + (holiday == null ? "" : " • " + holiday) + "\n" : "") + shift.typeName());
-            ((TextView) view.findViewById(R.id.shiftAmount)).setText(Fa.money(db.estimatedAmount(shift)));
-            ((TextView) view.findViewById(R.id.shiftDetails)).setText(shift.hospitalName + " • " + timeRange(shift) + (shift.paid ? " • پرداخت‌شده" : " • پرداخت‌نشده"));
-            ((TextView) view.findViewById(R.id.shiftReminder)).setText(shift.alarmEnabled ? "زنگ: " + (shift.reminderMinutes == 0 ? "هنگام شروع" : Fa.n(shift.reminderMinutes) + " دقیقه قبل") : "بدون زنگ");
-            return view;
-        }
-    }
-
-    private String timeRange(Shift shift) {
-        java.time.ZonedDateTime start = Instant.ofEpochMilli(shift.startMillis).atZone(ZoneId.systemDefault());
-        java.time.ZonedDateTime end = Instant.ofEpochMilli(shift.endMillis).atZone(ZoneId.systemDefault());
-        String text = "ساعت " + Fa.time(start.getHour(), start.getMinute()) + " تا " + Fa.time(end.getHour(), end.getMinute());
-        if (!start.toLocalDate().equals(end.toLocalDate())) text += " روز بعد";
-        return text;
-    }
-
-    private LinearLayout column() { LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL); v.setLayoutDirection(View.LAYOUT_DIRECTION_RTL); return v; }
-    private LinearLayout row() { LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.HORIZONTAL); v.setGravity(Gravity.CENTER_VERTICAL); v.setLayoutDirection(View.LAYOUT_DIRECTION_RTL); return v; }
-    private LinearLayout form() { LinearLayout v = column(); v.setPadding(dp(20), dp(8), dp(20), dp(18)); return v; }
-    private TextView heading(String text, int size) { return label(text, size, true); }
-    private TextView label(String text, int size, boolean bold) { TextView v = new TextView(this); v.setText(text); v.setTextSize(size); v.setTextColor(getColor(R.color.ink)); v.setPadding(dp(5), dp(6), dp(5), dp(6)); if (bold) v.setTypeface(Typeface.DEFAULT, Typeface.BOLD); return v; }
-    private TextView kicker(String text) { TextView v = label(text, 12, true); v.setTextColor(getColor(R.color.raspberry)); return v; }
-    private TextView muted(String text) { TextView v = label(text, 13, false); v.setTextColor(getColor(R.color.muted)); return v; }
-    private TextView empty(String text) { TextView v = muted(text); v.setGravity(Gravity.CENTER); v.setPadding(dp(8), dp(25), dp(8), dp(25)); return v; }
-    private LinearLayout card() { LinearLayout v = column(); v.setBackgroundResource(R.drawable.bg_card); v.setPadding(dp(16), dp(14), dp(16), dp(16)); v.setElevation(dp(3)); return v; }
-    private Button shortcut(String text, int background, int color) { Button b = new Button(this); b.setText(text); b.setTextSize(14); b.setTextColor(getColor(color)); b.setTypeface(Typeface.DEFAULT, Typeface.BOLD); b.setAllCaps(false); b.setGravity(Gravity.CENTER); b.setMinWidth(0); b.setMinHeight(0); b.setBackgroundResource(background); LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(102), 1); p.setMargins(dp(4), 0, dp(4), 0); b.setLayoutParams(p); return b; }
-    private Button smallButton(String text) { Button b = new Button(this); b.setText(text); b.setTextSize(12); b.setTextColor(getColor(R.color.ink)); b.setMinHeight(0); b.setMinWidth(0); b.setAllCaps(false); b.setBackgroundResource(R.drawable.bg_chip); return b; }
-    private Spinner spinner(String[] values) { Spinner s = new Spinner(this); s.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, values)); s.setPadding(dp(8), 0, dp(8), 0); s.setBackgroundResource(R.drawable.bg_input); return s; }
-    private EditText input(String hint, String value, boolean number) { EditText e = new EditText(this); e.setHint(hint); e.setText(value); e.setTextSize(15); e.setSingleLine(); e.setTextColor(getColor(R.color.ink)); e.setHintTextColor(getColor(R.color.muted)); e.setBackgroundResource(R.drawable.bg_input); if (number) e.setInputType(InputType.TYPE_CLASS_NUMBER); LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(55)); p.setMargins(0, dp(5), 0, dp(6)); e.setLayoutParams(p); return e; }
-    private LinearLayout.LayoutParams weight() { return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1); }
-    private LinearLayout.LayoutParams weightHeight(int height) { LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, height, 1); p.setMargins(dp(4), 0, dp(4), 0); return p; }
-    private LinearLayout.LayoutParams marginTop(int dp) { LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT); p.setMargins(0, dp(dp), 0, 0); return p; }
-    private GridLayout.LayoutParams gridCell() { GridLayout.LayoutParams p = new GridLayout.LayoutParams(); p.width = 0; p.height = dp(68); p.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f); p.setMargins(dp(2), dp(2), dp(2), dp(2)); return p; }
-    private int dp(int v) { return Math.round(v * getResources().getDisplayMetrics().density); }
-    private String monthTitle() { return PersianDate.MONTHS[viewMonth - 1] + " " + Fa.n(viewYear); }
-    private void moveMonth(int delta) { viewMonth += delta; if (viewMonth == 13) { viewMonth = 1; viewYear++; } else if (viewMonth == 0) { viewMonth = 12; viewYear--; } }
-    private PersianDate nextMonth(PersianDate date) { return date.month == 12 ? new PersianDate(date.year + 1, 1, 1) : new PersianDate(date.year, date.month + 1, 1); }
-    private String typeCode(int position) { if (position == 1) return Shift.TYPE_DAY; if (position == 2) return Shift.TYPE_EVENING; if (position == 3) return Shift.TYPE_NIGHT; return null; }
-    private String[] hospitalNames(List<Hospital> hospitals, boolean all) { ArrayList<String> names = new ArrayList<>(); if (all) names.add("همه بیمارستان‌ها"); for (Hospital h : hospitals) names.add(h.name); return names.toArray(new String[0]); }
-    private String[] range(int first, int last) { String[] r = new String[last - first + 1]; for (int i = 0; i < r.length; i++) r[i] = Fa.n(first + i); return r; }
-    private String[] days(int year, int month) { return range(1, PersianDate.monthLength(year, month)); }
-    private long number(EditText input) { String s = input.getText().toString().trim().replace(",", "").replace("٬", ""); s = s.replace('۰','0').replace('۱','1').replace('۲','2').replace('۳','3').replace('۴','4').replace('۵','5').replace('۶','6').replace('۷','7').replace('۸','8').replace('۹','9'); try { return s.isEmpty() ? 0 : Long.parseLong(s); } catch (Exception e) { return 0; } }
+    void refreshHospitalBox(LinearLayout box,long[] id){box.removeAllViews();box.addView(selectButton(db.hospital(id[0]).name,()->chooseHospital(false,id[0],chosen->{id[0]=chosen;refreshHospitalBox(box,id);})),u.full(46));}
+    TextView fieldButton(String text){TextView v=u.text(text,13,Ui.INK,true);v.setGravity(Gravity.CENTER);v.setPadding(u.dp(8),u.dp(8),u.dp(8),u.dp(8));v.setMinHeight(u.dp(46));u.touch(v,Color.WHITE,12,Ui.LINE);return v;}
+    TextView timeField(int h,int m){TextView v=fieldButton(Fa.time(h,m));v.setTextDirection(View.TEXT_DIRECTION_LTR);return v;}
+    void setDefaultTimes(int type,int[] h){h[0]=type==2?23:type==1?15:7;h[1]=0;h[2]=type==2?7:type==1?23:15;h[3]=0;}
+    String reminderText(int minutes){return minutes<0?"خاموش":minutes==0?"زمان شروع":Fa.n(minutes)+" دقیقه قبل";}
+    long parseAmount(EditText field){String s=field.getText().toString().trim();if(s.isEmpty())return 0;StringBuilder digits=new StringBuilder();for(char c:s.toCharArray()){int d=Character.digit(c,10);if(d<0)throw new IllegalArgumentException("فقط عدد بدون جداکننده وارد کن");digits.append(d);}try{long n=Long.parseLong(digits.toString());if(n>1_000_000_000_000L)throw new NumberFormatException();return n;}catch(NumberFormatException e){throw new IllegalArgumentException("مبلغ بیش از محدودهٔ مجاز است");}}
+    void editHospital(Hospital old,Runnable after){Hospital h=old==null?new Hospital():db.hospital(old.id);LinearLayout form=u.col();EditText name=u.input(h.name,"نام بیمارستان",false),ward=u.input(h.ward,"مثلاً اورژانس",false),base=u.input(h.baseSalary==0?"":Fa.n(h.baseSalary),"۰",true),day=u.input(h.dayRate==0?"":Fa.n(h.dayRate),"خودکار",true),evening=u.input(h.eveningRate==0?"":Fa.n(h.eveningRate),"خودکار",true),night=u.input(h.nightRate==0?"":Fa.n(h.nightRate),"خودکار",true);name.setTag("hospitalName");u.field(form,"نام بیمارستان",name);u.field(form,"بخش (اختیاری)",ward);u.field(form,"حقوق پایهٔ ماهانه · تومان",base);u.field(form,"هزینهٔ تقریبی روزکار · تومان",day);u.field(form,"هزینهٔ تقریبی عصرکار · تومان",evening);u.field(form,"هزینهٔ تقریبی شب‌کار · تومان",night);form.addView(u.text("تعرفهٔ خالی یا صفر = میانگین تعرفه‌های واردشدهٔ همین بیمارستان. اگر هیچ نرخی وارد نشود مبلغ صفر می‌ماند. هر تعرفه برای یک شیفت است؛ ساعت سفارشی آن را تغییر نمی‌دهد.",11,Ui.MUTED,false),u.gap(-2,12));final Dialog[] dialog={null};LinearLayout save=u.button("ذخیره بیمارستان",Ui.CHECK,true,()->{if(name.getText().toString().trim().isEmpty()){name.setError("نام بیمارستان را وارد کن");return;}try{h.name=name.getText().toString().trim();h.ward=ward.getText().toString().trim();h.baseSalary=parseAmount(base);h.dayRate=parseAmount(day);h.eveningRate=parseAmount(evening);h.nightRate=parseAmount(night);h.id=db.saveHospital(h);dialog[0].dismiss();showTab(tab);toast("بیمارستان ذخیره شد");if(after!=null)after.run();}catch(IllegalArgumentException e){toast(e.getMessage());}});save.setTag("saveHospital");form.addView(save,u.gap(52,14));dialog[0]=sheet(old==null?"بیمارستان تازه":"ویرایش بیمارستان",form);}
+    void pickDate(PersianDate initial,Consumer<PersianDate> choose){final PersianDate[] value={initial};LinearLayout body=u.col();body.setPadding(u.dp(12),u.dp(6),u.dp(12),u.dp(8));final AlertDialog[] dialog={null};Runnable[] render={null};render[0]=()->{body.removeAllViews();LinearLayout bar=u.row();bar.addView(u.iconButton(Ui.RIGHT,"ماه بعد",()->{value[0]=nextMonth(new PersianDate(value[0].year,value[0].month,1));render[0].run();}),new LinearLayout.LayoutParams(u.dp(48),u.dp(48)));TextView monthLabel=u.text(PersianDate.MONTHS[value[0].month-1]+" "+Fa.n(value[0].year),17,Ui.INK,true);monthLabel.setGravity(Gravity.CENTER);monthLabel.setOnClickListener(v->pickYear(value[0].year,y->{value[0]=new PersianDate(y,value[0].month,1);render[0].run();}));bar.addView(monthLabel,u.weight(48));bar.addView(u.iconButton(Ui.LEFT,"ماه قبل",()->{value[0]=new PersianDate(value[0].year,value[0].month,1).plusDays(-1);render[0].run();}),new LinearLayout.LayoutParams(u.dp(48),u.dp(48)));body.addView(bar);body.addView(calendarGrid(value[0].year,value[0].month,value[0],Collections.emptyList(),d->{choose.accept(d);dialog[0].dismiss();}));};render[0].run();dialog[0]=new AlertDialog.Builder(this).setTitle("انتخاب تاریخ شمسی").setView(body).setNegativeButton("انصراف",null).setNeutralButton("امروز",(d,w)->choose.accept(PersianDate.today())).create();dialog[0].show();}
+    void pickYear(int current,Consumer<Integer> chosen){NumberPicker picker=new NumberPicker(this);picker.setMinValue(1300);picker.setMaxValue(1500);picker.setValue(Math.max(1300,Math.min(1500,current)));picker.setFormatter(value->Fa.n(value));picker.setWrapSelectorWheel(false);new AlertDialog.Builder(this).setTitle("سال شمسی").setView(picker).setPositiveButton("انتخاب",(d,w)->{picker.clearFocus();chosen.accept(picker.getValue());}).setNegativeButton("انصراف",null).show();}
+    void filters(){LinearLayout form=u.col();long[] hid={hospitalFilter};int[] type={typeFilter==null?0:Arrays.asList(types).indexOf(typeFilter)+1},paid={paidFilter};PersianDate[] range={filterFrom,filterTo};LinearLayout hospitalBox=u.col();Runnable[] refresh={null};refresh[0]=()->{hospitalBox.removeAllViews();hospitalBox.addView(selectButton(hid[0]==0?"همه بیمارستان‌ها":db.hospital(hid[0]).name,()->chooseHospital(true,hid[0],id->{hid[0]=id;refresh[0].run();})),u.full(46));};refresh[0].run();u.field(form,"بیمارستان",hospitalBox);TextView typeButton=fieldButton(type[0]==0?"همه نوع‌ها":typeNames[type[0]-1]);typeButton.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("نوع شیفت").setItems(new String[]{"همه نوع‌ها","روزکار","عصرکار","شب‌کار"},(d,w)->{type[0]=w;typeButton.setText(w==0?"همه نوع‌ها":typeNames[w-1]);}).show());u.field(form,"نوع شیفت",typeButton);TextView paidButton=fieldButton(paid[0]<0?"همه وضعیت‌ها":paid[0]==1?"دریافت‌شده":"دریافت‌نشده");paidButton.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("وضعیت پرداخت").setItems(new String[]{"همه وضعیت‌ها","دریافت‌شده","دریافت‌نشده"},(d,w)->{paid[0]=w==0?-1:w==1?1:0;paidButton.setText(w==0?"همه وضعیت‌ها":w==1?"دریافت‌شده":"دریافت‌نشده");}).show());u.field(form,"پرداخت",paidButton);
+        TextView from=fieldButton(range[0]==null?"ابتدای ماه انتخابی":dateText(range[0],true)),to=fieldButton(range[1]==null?"انتهای ماه انتخابی":dateText(range[1],true));from.setOnClickListener(v->pickDate(range[0]==null?new PersianDate(year,month,1):range[0],d->{range[0]=d;from.setText(dateText(d,true));}));to.setOnClickListener(v->pickDate(range[1]==null?new PersianDate(year,month,PersianDate.monthLength(year,month)):range[1],d->{range[1]=d;to.setText(dateText(d,true));}));u.field(form,"از تاریخ (شامل این روز)",from);u.field(form,"تا تاریخ (شامل این روز)",to);final Dialog[] dialog={null};form.addView(u.button("اعمال فیلتر",Ui.FILTER,true,()->{PersianDate a=range[0]==null?new PersianDate(year,month,1):range[0],b=range[1]==null?new PersianDate(year,month,PersianDate.monthLength(year,month)):range[1];if(a.compareTo(b)>0){toast("تاریخ پایان باید بعد از شروع باشد");return;}hospitalFilter=hid[0];typeFilter=type[0]==0?null:types[type[0]-1];paidFilter=paid[0];filterFrom=range[0];filterTo=range[1];dialog[0].dismiss();showTab(0);}),u.gap(50,14));form.addView(u.button("پاک کردن فیلترها",null,false,()->{hospitalFilter=0;typeFilter=null;paidFilter=-1;filterFrom=null;filterTo=null;dialog[0].dismiss();showTab(0);}),u.gap(48,8));dialog[0]=sheet("فیلتر دقیق شیفت‌ها",form);}
+    void reminderPermissions(){boolean notifications=Build.VERSION.SDK_INT<33||checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)==PackageManager.PERMISSION_GRANTED;AlarmManager manager=(AlarmManager)getSystemService(ALARM_SERVICE);boolean exact=Build.VERSION.SDK_INT<31||manager.canScheduleExactAlarms();if(!notifications||!exact)new AlertDialog.Builder(this).setTitle("اجازهٔ زنگ یادآوری").setMessage("شیفت ذخیره شد. برای زنگ به‌موقع، اعلان‌ها و هشدار دقیق را فعال کن. بدون این دسترسی‌ها زنگ دقیق تضمین نمی‌شود.").setPositiveButton("بررسی دسترسی‌ها",(d,w)->settings()).setNegativeButton("بعداً",null).show();}
+    void settings(){LinearLayout form=u.col();form.addView(u.text("شیفتالو · ساده و بامزه\nهمهٔ داده‌ها فقط روی همین گوشی‌اند. اینترنت و حساب کاربری لازم نیست. حذف برنامه داده‌ها را پاک می‌کند.",14,Ui.INK,false),u.gap(-2,8));form.addView(u.button("دسترسی اعلان‌ها",Ui.BELL,false,()->{if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},11);else startActivity(new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,getPackageName()));}),u.gap(50,16));form.addView(u.button("اجازهٔ هشدار دقیق",Ui.CLOCK,false,()->{if(Build.VERSION.SDK_INT>=31)startActivity(new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,Uri.parse("package:"+getPackageName())));else toast("در این نسخهٔ اندروید اجازهٔ جداگانه لازم نیست");}),u.gap(50,10));if(Build.VERSION.SDK_INT>=34)form.addView(u.button("نمایش زنگ روی صفحهٔ قفل",Ui.CALENDAR,false,()->startActivity(new Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,Uri.parse("package:"+getPackageName())))),u.gap(50,10));form.addView(u.text("برای ویجت، روی صفحهٔ اصلی گوشی نگه دار و از «ابزارک‌ها» شیفتالو را انتخاب کن.\n\nبرای زنگ مطمئن‌تر در تنظیمات باتری گوشی، محدودیت فعالیت پس‌زمینهٔ شیفتالو را بردار. صدای آلارم باید باز باشد.\n\nتقویم: محاسبهٔ شمسی روی گوشی؛ جدول مناسبت‌های قمری فعلاً برای ۱۴۰۵ موجود است.",12,Ui.MUTED,false),u.gap(-2,16));sheet("تنظیمات و راهنما",form);}
+    String timeRange(Shift s){ZonedDateTime a=Instant.ofEpochMilli(s.startMillis).atZone(ZoneId.systemDefault()),b=Instant.ofEpochMilli(s.endMillis).atZone(ZoneId.systemDefault());return Fa.time(a.getHour(),a.getMinute())+" – "+Fa.time(b.getHour(),b.getMinute());}
+    static String dateText(PersianDate d,boolean withYear){return PersianDate.WEEKDAYS[d.weekdayIndex()]+" "+Fa.n(d.day)+" "+PersianDate.MONTHS[d.month-1]+(withYear?" "+Fa.n(d.year):"");}
+    String monthTitle(){return PersianDate.MONTHS[month-1]+" "+Fa.n(year);}
+    static PersianDate nextMonth(PersianDate d){return d.month==12?new PersianDate(d.year+1,1,1):new PersianDate(d.year,d.month+1,1);}
+    void moveMonth(int delta){month+=delta;if(month<1){month=12;year--;}if(month>12){month=1;year++;}selected=new PersianDate(year,month,1);}
+    void toast(String message){Toast.makeText(this,message,Toast.LENGTH_LONG).show();}
 }

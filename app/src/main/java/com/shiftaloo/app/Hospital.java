@@ -10,8 +10,12 @@ public final class Hospital {
     public long nightRate;
 
     public long rateFor(String type) {
-        if (Shift.TYPE_EVENING.equals(type)) return eveningRate;
-        if (Shift.TYPE_NIGHT.equals(type)) return nightRate;
-        return dayRate;
+        long explicit = Shift.TYPE_EVENING.equals(type) ? eveningRate : Shift.TYPE_NIGHT.equals(type) ? nightRate : dayRate;
+        if (explicit > 0) return explicit;
+        // All three default shifts are eight hours. Missing tariffs use the mean
+        // of the entered tariffs; zero means unspecified, never a fabricated fee.
+        long sum=0; int count=0;
+        for(long rate : new long[]{dayRate,eveningRate,nightRate}) if(rate>0){sum+=rate;count++;}
+        return count==0?0:Math.round((double)sum/count);
     }
 }
