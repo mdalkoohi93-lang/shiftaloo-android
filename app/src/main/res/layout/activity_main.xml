@@ -1,88 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="@color/cream"
-    android:orientation="vertical"
-    android:layoutDirection="rtl">
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingStart="18dp"
-        android:paddingTop="14dp"
-        android:paddingEnd="18dp"
-        android:paddingBottom="10dp">
-
-        <ImageView
-            android:layout_width="54dp"
-            android:layout_height="54dp"
-            android:contentDescription="لوگوی شیفتالو"
-            android:src="@mipmap/ic_launcher" />
-
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="10dp"
-            android:layout_weight="1"
-            android:orientation="vertical">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="شیفتالو"
-                android:textColor="@color/ink"
-                android:textSize="26sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/todayLabel"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textColor="@color/muted"
-                android:textSize="13sp" />
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@color/paper" android:layoutDirection="rtl">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:paddingBottom="140dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:paddingStart="20dp" android:paddingTop="14dp" android:paddingEnd="20dp" android:paddingBottom="8dp">
+            <ImageView android:layout_width="88dp" android:layout_height="88dp" android:contentDescription="لوگوی بامزه شیفتالو" android:src="@drawable/shiftaloo_mascot" />
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="12dp" android:layout_weight="1" android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="برنامه شیفت‌های بیمارستان" android:textColor="@color/raspberry" android:textSize="12sp" android:textStyle="bold" />
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="1dp" android:text="شیفتالو" android:textColor="@color/ink" android:textSize="32sp" android:textStyle="bold" />
+                <TextView android:id="@+id/todayLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:textColor="@color/muted" android:textSize="12sp" />
+            </LinearLayout>
         </LinearLayout>
-
-        <Button
-            android:id="@+id/addShiftButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:background="@drawable/bg_primary"
-            android:minHeight="0dp"
-            android:minWidth="0dp"
-            android:text="+ شیفت"
-            android:textColor="@color/white"
-            android:textSize="14sp"
-            android:textStyle="bold" />
+        <FrameLayout android:id="@+id/content" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
     </LinearLayout>
-
-    <HorizontalScrollView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:fillViewport="true"
-        android:scrollbars="none">
-
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:paddingBottom="8dp">
-
-            <Button android:id="@+id/tabAgenda" style="@style/NavButton" android:text="فهرست روزانه" />
-            <Button android:id="@+id/tabCalendar" style="@style/NavButton" android:text="تقویم شمسی" />
-            <Button android:id="@+id/tabReports" style="@style/NavButton" android:text="گزارش و حقوق" />
-            <Button android:id="@+id/tabHospitals" style="@style/NavButton" android:text="بیمارستان‌ها" />
-        </LinearLayout>
-    </HorizontalScrollView>
-
-    <FrameLayout
-        android:id="@+id/content"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1" />
-
-</LinearLayout>
+    <Button android:id="@+id/addShiftButton" android:layout_width="match_parent" android:layout_height="60dp" android:layout_gravity="bottom" android:layout_marginStart="16dp" android:layout_marginEnd="16dp" android:layout_marginBottom="78dp" android:background="@drawable/bg_primary" android:drawableStart="@drawable/ic_add_circle" android:drawablePadding="9dp" android:gravity="center" android:text="افزودن شیفت تازه" android:textAllCaps="false" android:textColor="@color/white" android:textSize="17sp" android:textStyle="bold" android:elevation="10dp" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="72dp" android:layout_gravity="bottom" android:background="@color/white" android:elevation="16dp" android:orientation="horizontal" android:paddingStart="8dp" android:paddingTop="7dp" android:paddingEnd="8dp" android:paddingBottom="7dp">
+        <Button android:id="@+id/tabAgenda" style="@style/BottomNavButton" android:text="☷\nشیفت‌ها" />
+        <Button android:id="@+id/tabCalendar" style="@style/BottomNavButton" android:text="▦\nتقویم" />
+        <Button android:id="@+id/tabReports" style="@style/BottomNavButton" android:text="▥\nگزارش" />
+        <Button android:id="@+id/tabHospitals" style="@style/BottomNavButton" android:text="✚\nبیمارستان‌ها" />
+    </LinearLayout>
+</FrameLayout>

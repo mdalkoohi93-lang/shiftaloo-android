@@ -1,13 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="peach">#FF8D79</color>
-    <color name="peach_dark">#E96457</color>
-    <color name="cream">#FFF8EF</color>
-    <color name="ink">#342A2B</color>
-    <color name="muted">#7B6E6F</color>
-    <color name="mint">#DDF4E8</color>
-    <color name="sun">#FFD66B</color>
-    <color name="night">#6F72C9</color>
-    <color name="white">#FFFFFFFF</color>
-    <color name="danger">#C53B45</color>
+    <color name="paper">#FFFAF5</color><color name="cream">#FFFAF5</color><color name="white">#FFFFFFFF</color>
+    <color name="ink">#123968</color><color name="muted">#70809A</color>
+    <color name="raspberry">#DF2456</color><color name="raspberry_dark">#BB1643</color>
+    <color name="peach">#FFAD69</color><color name="peach_dark">#AD5803</color><color name="peach_soft">#FFF0DF</color>
+    <color name="mint">#CDF8EA</color><color name="mint_ink">#087F69</color>
+    <color name="lilac">#E8DDFF</color><color name="lilac_ink">#5B43A7</color>
+    <color name="sky">#DFF1FF</color><color name="line">#E8EDF4</color><color name="danger">#B4233F</color>
 </resources>

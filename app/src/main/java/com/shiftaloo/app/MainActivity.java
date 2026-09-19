@@ -45,6 +45,7 @@ public final class MainActivity extends Activity {
     private int viewYear;
     private int viewMonth;
     private int activeTab = 0;
+    private int pendingQuickType = -1;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -74,6 +75,8 @@ public final class MainActivity extends Activity {
 
     private void showTab(int tab) {
         activeTab = tab;
+        int[] tabs = {R.id.tabAgenda, R.id.tabCalendar, R.id.tabReports, R.id.tabHospitals};
+        for (int i = 0; i < tabs.length; i++) findViewById(tabs[i]).setSelected(i == tab);
         content.removeAllViews();
         if (tab == 1) content.addView(calendarPage());
         else if (tab == 2) content.addView(reportPage());
@@ -82,43 +85,77 @@ public final class MainActivity extends Activity {
     }
 
     private View agendaPage() {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
         LinearLayout root = column();
-        root.setPadding(dp(14), dp(4), dp(14), dp(12));
+        root.setPadding(dp(16), dp(4), dp(16), dp(28));
+        scroll.addView(root);
 
+        List<Shift> future = db.futureShifts(System.currentTimeMillis(), 1);
+        LinearLayout nextCard = column();
+        nextCard.setBackgroundResource(R.drawable.bg_next_shift);
+        nextCard.setElevation(dp(5));
+        if (future.isEmpty()) {
+            nextCard.addView(kicker("شیفت بعدی"));
+            nextCard.addView(heading("فعلاً شیفتی در راه نیست 🌱", 20));
+            nextCard.addView(muted("از دکمه‌های پایین یک شیفت تازه بساز."));
+            nextCard.setOnClickListener(v -> showShiftDialog(null, null));
+        } else {
+            Shift upcoming = future.get(0);
+            nextCard.addView(kicker("شیفت بعدی"));
+            nextCard.addView(heading(PersianDate.fromMillis(upcoming.startMillis).longText(), 22));
+            nextCard.addView(heading(upcoming.typeName() + " · " + upcoming.hospitalName, 16));
+            nextCard.addView(muted(timeRange(upcoming) + (upcoming.alarmEnabled ? " · زنگ فعال" : "")));
+            nextCard.setOnClickListener(v -> showShiftDialog(upcoming, null));
+        }
+        root.addView(nextCard);
+
+        LinearLayout shortcutCard = card();
+        shortcutCard.addView(kicker("ثبت سریع"));
+        shortcutCard.addView(heading("چه شیفتی داری؟", 17));
+        LinearLayout shortcuts = row();
+        Button dayQuick = shortcut("☀\nروزکار\n۷ تا ۱۵", R.drawable.bg_day, R.color.mint_ink);
+        Button eveningQuick = shortcut("◒\nعصرکار\n۱۵ تا ۲۳", R.drawable.bg_evening, R.color.peach_dark);
+        Button nightQuick = shortcut("☾\nشب‌کار\n۱۹ تا ۷", R.drawable.bg_night, R.color.lilac_ink);
+        dayQuick.setOnClickListener(v -> quickShift(0)); eveningQuick.setOnClickListener(v -> quickShift(1)); nightQuick.setOnClickListener(v -> quickShift(2));
+        shortcuts.addView(dayQuick, weightHeight(dp(102))); shortcuts.addView(eveningQuick, weightHeight(dp(102))); shortcuts.addView(nightQuick, weightHeight(dp(102)));
+        shortcutCard.addView(shortcuts, marginTop(10));
+        root.addView(shortcutCard, marginTop(14));
+
+        LinearLayout listCard = card();
         LinearLayout monthBar = row();
-        Button next = smallButton("ماه بعد");
-        TextView title = heading(monthTitle(), 19);
-        title.setGravity(Gravity.CENTER);
-        Button previous = smallButton("ماه قبل");
-        monthBar.addView(next);
-        monthBar.addView(title, weight());
-        monthBar.addView(previous);
-        root.addView(monthBar);
+        Button next = smallButton("‹");
+        TextView title = heading(monthTitle(), 18); title.setGravity(Gravity.CENTER);
+        Button previous = smallButton("›");
+        monthBar.addView(next); monthBar.addView(title, weight()); monthBar.addView(previous);
+        listCard.addView(monthBar);
 
         List<Hospital> hospitals = db.hospitals();
         Spinner hospital = spinner(hospitalNames(hospitals, true));
         Spinner type = spinner(new String[]{"همه نوع‌ها", "روزکار", "عصرکار", "شب‌کار"});
         Spinner paid = spinner(new String[]{"پرداخت: همه", "پرداخت‌شده", "پرداخت‌نشده"});
-        LinearLayout filter1 = row();
-        filter1.setPadding(0, dp(8), 0, dp(8));
-        filter1.addView(hospital, weight());
-        filter1.addView(type, weight());
-        root.addView(filter1);
-        root.addView(paid, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)));
-
-        ListView list = new ListView(this);
-        list.setDividerHeight(0);
-        root.addView(list, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        LinearLayout filter1 = row(); filter1.setPadding(0, dp(8), 0, dp(6));
+        filter1.addView(hospital, weight()); filter1.addView(type, weight());
+        listCard.addView(filter1); listCard.addView(paid, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)));
+        LinearLayout list = column(); listCard.addView(list, marginTop(8));
+        root.addView(listCard, marginTop(14));
 
         Runnable refresh = () -> {
             PersianDate first = new PersianDate(viewYear, viewMonth, 1);
-            PersianDate nextMonth = nextMonth(first);
             long hospitalId = hospital.getSelectedItemPosition() <= 0 ? 0 : hospitals.get(hospital.getSelectedItemPosition() - 1).id;
             String shiftType = typeCode(type.getSelectedItemPosition());
             int paidFilter = paid.getSelectedItemPosition() == 0 ? -1 : paid.getSelectedItemPosition() == 1 ? 1 : 0;
-            List<Shift> shifts = db.filteredShifts(first.atTimeMillis(0, 0), nextMonth.atTimeMillis(0, 0), hospitalId, shiftType, paidFilter);
-            list.setAdapter(new ShiftAdapter(shifts));
-            title.setText(monthTitle() + " • " + Fa.n(shifts.size()) + " شیفت");
+            List<Shift> shifts = db.filteredShifts(first.atTimeMillis(0, 0), nextMonth(first).atTimeMillis(0, 0), hospitalId, shiftType, paidFilter);
+            title.setText(monthTitle() + " · " + Fa.n(shifts.size()) + " شیفت");
+            list.removeAllViews();
+            if (shifts.isEmpty()) list.addView(empty("برای این فیلتر شیفتی پیدا نشد 🍑"));
+            for (int i = 0; i < shifts.size(); i++) {
+                Shift shift = shifts.get(i);
+                View item = new ShiftAdapter(shifts).getView(i, null, list);
+                item.setOnClickListener(v -> showShiftDialog(shift, null));
+                item.setOnLongClickListener(v -> { confirmDelete(shift); return true; });
+                list.addView(item);
+            }
         };
         AdapterView.OnItemSelectedListener changed = new AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) { refresh.run(); }
@@ -129,22 +166,17 @@ public final class MainActivity extends Activity {
         paid.setOnItemSelectedListener(changed);
         previous.setOnClickListener(v -> { moveMonth(-1); showTab(0); });
         next.setOnClickListener(v -> { moveMonth(1); showTab(0); });
-        list.setOnItemClickListener((p, v, position, id) -> showShiftDialog((Shift) list.getAdapter().getItem(position), null));
-        list.setOnItemLongClickListener((p, v, position, id) -> {
-            Shift shift = (Shift) list.getAdapter().getItem(position);
-            new AlertDialog.Builder(this).setTitle("حذف شیفت؟")
-                    .setMessage(shift.typeName() + " در " + shift.hospitalName)
-                    .setNegativeButton("نه", null)
-                    .setPositiveButton("حذف", (d, w) -> {
-                        AlarmScheduler.cancel(this, shift.id);
-                        db.deleteShift(shift.id);
-                        ShiftWidgetProvider.refresh(this);
-                        showTab(0);
-                    }).show();
-            return true;
-        });
         refresh.run();
-        return root;
+        return scroll;
+    }
+
+    private void quickShift(int type) { pendingQuickType = type; showShiftDialog(null, null); }
+
+    private void confirmDelete(Shift shift) {
+        new AlertDialog.Builder(this).setTitle("حذف شیفت؟").setMessage(shift.typeName() + " در " + shift.hospitalName)
+                .setNegativeButton("نه", null).setPositiveButton("حذف", (d, w) -> {
+                    AlarmScheduler.cancel(this, shift.id); db.deleteShift(shift.id); ShiftWidgetProvider.refresh(this); showTab(0);
+                }).show();
     }
 
     private View calendarPage() {
@@ -425,6 +457,11 @@ public final class MainActivity extends Activity {
             }
             @Override public void onNothingSelected(AdapterView<?> p) {}
         });
+        if (existing == null && pendingQuickType >= 0) {
+            int quick = pendingQuickType;
+            pendingQuickType = -1;
+            type.setSelection(quick);
+        }
 
         ScrollView wrapper = new ScrollView(this); wrapper.addView(form);
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle(existing == null ? "شیفت تازه" : "ویرایش شیفت")
@@ -519,13 +556,19 @@ public final class MainActivity extends Activity {
 
     private LinearLayout column() { LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.VERTICAL); v.setLayoutDirection(View.LAYOUT_DIRECTION_RTL); return v; }
     private LinearLayout row() { LinearLayout v = new LinearLayout(this); v.setOrientation(LinearLayout.HORIZONTAL); v.setGravity(Gravity.CENTER_VERTICAL); v.setLayoutDirection(View.LAYOUT_DIRECTION_RTL); return v; }
-    private LinearLayout form() { LinearLayout v = column(); v.setPadding(dp(20), dp(8), dp(20), dp(8)); return v; }
+    private LinearLayout form() { LinearLayout v = column(); v.setPadding(dp(20), dp(8), dp(20), dp(18)); return v; }
     private TextView heading(String text, int size) { return label(text, size, true); }
     private TextView label(String text, int size, boolean bold) { TextView v = new TextView(this); v.setText(text); v.setTextSize(size); v.setTextColor(getColor(R.color.ink)); v.setPadding(dp(5), dp(6), dp(5), dp(6)); if (bold) v.setTypeface(Typeface.DEFAULT, Typeface.BOLD); return v; }
+    private TextView kicker(String text) { TextView v = label(text, 12, true); v.setTextColor(getColor(R.color.raspberry)); return v; }
+    private TextView muted(String text) { TextView v = label(text, 13, false); v.setTextColor(getColor(R.color.muted)); return v; }
+    private TextView empty(String text) { TextView v = muted(text); v.setGravity(Gravity.CENTER); v.setPadding(dp(8), dp(25), dp(8), dp(25)); return v; }
+    private LinearLayout card() { LinearLayout v = column(); v.setBackgroundResource(R.drawable.bg_card); v.setPadding(dp(16), dp(14), dp(16), dp(16)); v.setElevation(dp(3)); return v; }
+    private Button shortcut(String text, int background, int color) { Button b = new Button(this); b.setText(text); b.setTextSize(14); b.setTextColor(getColor(color)); b.setTypeface(Typeface.DEFAULT, Typeface.BOLD); b.setAllCaps(false); b.setGravity(Gravity.CENTER); b.setMinWidth(0); b.setMinHeight(0); b.setBackgroundResource(background); LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(102), 1); p.setMargins(dp(4), 0, dp(4), 0); b.setLayoutParams(p); return b; }
     private Button smallButton(String text) { Button b = new Button(this); b.setText(text); b.setTextSize(12); b.setTextColor(getColor(R.color.ink)); b.setMinHeight(0); b.setMinWidth(0); b.setAllCaps(false); b.setBackgroundResource(R.drawable.bg_chip); return b; }
-    private Spinner spinner(String[] values) { Spinner s = new Spinner(this); s.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, values)); s.setPadding(dp(6), 0, dp(6), 0); return s; }
-    private EditText input(String hint, String value, boolean number) { EditText e = new EditText(this); e.setHint(hint); e.setText(value); e.setTextSize(15); e.setSingleLine(); if (number) e.setInputType(InputType.TYPE_CLASS_NUMBER); e.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(55))); return e; }
+    private Spinner spinner(String[] values) { Spinner s = new Spinner(this); s.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, values)); s.setPadding(dp(8), 0, dp(8), 0); s.setBackgroundResource(R.drawable.bg_input); return s; }
+    private EditText input(String hint, String value, boolean number) { EditText e = new EditText(this); e.setHint(hint); e.setText(value); e.setTextSize(15); e.setSingleLine(); e.setTextColor(getColor(R.color.ink)); e.setHintTextColor(getColor(R.color.muted)); e.setBackgroundResource(R.drawable.bg_input); if (number) e.setInputType(InputType.TYPE_CLASS_NUMBER); LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(55)); p.setMargins(0, dp(5), 0, dp(6)); e.setLayoutParams(p); return e; }
     private LinearLayout.LayoutParams weight() { return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1); }
+    private LinearLayout.LayoutParams weightHeight(int height) { LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, height, 1); p.setMargins(dp(4), 0, dp(4), 0); return p; }
     private LinearLayout.LayoutParams marginTop(int dp) { LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT); p.setMargins(0, dp(dp), 0, 0); return p; }
     private GridLayout.LayoutParams gridCell() { GridLayout.LayoutParams p = new GridLayout.LayoutParams(); p.width = 0; p.height = dp(68); p.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f); p.setMargins(dp(2), dp(2), dp(2), dp(2)); return p; }
     private int dp(int v) { return Math.round(v * getResources().getDisplayMetrics().density); }
