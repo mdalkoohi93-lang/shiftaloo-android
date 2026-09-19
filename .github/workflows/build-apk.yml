@@ -19,7 +19,9 @@ jobs:
           java-version: '17'
 
       - name: تنظیم اندروید
-        uses: android-actions/setup-android@v3
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: تنظیم Gradle
         uses: gradle/actions/setup-gradle@v4
