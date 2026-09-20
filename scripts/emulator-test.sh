@@ -11,6 +11,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 adb shell pm grant com.shiftaloo.app android.permission.POST_NOTIFICATIONS
 adb shell appops set com.shiftaloo.app SCHEDULE_EXACT_ALARM allow
+adb shell am force-stop com.google.android.apps.nexuslauncher
 adb shell am instrument -w com.shiftaloo.app.test/com.shiftaloo.app.SmokeRunner | tee qa-output/test-results.txt
 adb pull /sdcard/Android/data/com.shiftaloo.app/files/screenshots qa-output/ || true
 adb logcat -d -s AndroidRuntime:E > qa-output/crashes.txt
