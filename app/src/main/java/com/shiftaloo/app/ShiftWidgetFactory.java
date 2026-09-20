@@ -12,9 +12,10 @@ import java.util.List;
 
 public final class ShiftWidgetFactory implements RemoteViewsService.RemoteViewsFactory {
     private final Context context;
+    private final int widget;
     private final List<Shift> rows = new ArrayList<>();
 
-    public ShiftWidgetFactory(Context context) { this.context = context; }
+    public ShiftWidgetFactory(Context context,int widget) { this.context = context;this.widget=widget; }
     @Override public void onCreate() { load(); }
     @Override public void onDataSetChanged() { load(); }
     @Override public void onDestroy() { rows.clear(); }
@@ -22,7 +23,9 @@ public final class ShiftWidgetFactory implements RemoteViewsService.RemoteViewsF
 
     private void load() {
         rows.clear();
-        rows.addAll(new DbHelper(context).futureShifts(System.currentTimeMillis() - 12 * 60 * 60 * 1000L, 20));
+        android.content.SharedPreferences p=context.getSharedPreferences("widgets",Context.MODE_PRIVATE);
+        long hospital=p.getLong(widget+"hospital",0);String type=p.getString(widget+"type","");
+        try(DbHelper db=new DbHelper(context)){for(Shift s:db.futureShifts(System.currentTimeMillis(),10000))if((hospital==0||hospital==s.hospitalId)&&(type.isEmpty()||type.equals(s.type))){rows.add(s);if(rows.size()==30)break;}}
     }
 
     @Override public RemoteViews getViewAt(int position) {
@@ -33,7 +36,7 @@ public final class ShiftWidgetFactory implements RemoteViewsService.RemoteViewsF
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_row);
         views.setTextViewText(R.id.widgetRowTitle, date.shortText() + " • " + shift.typeName());
         views.setTextViewText(R.id.widgetRowDetail, shift.hospitalName + " • ساعت " + Fa.time(t.getHour(), t.getMinute()));
-        views.setOnClickFillInIntent(R.id.widgetRowTitle, new Intent().putExtra("shift_id", shift.id));
+        views.setOnClickFillInIntent(R.id.widgetRowRoot, new Intent().putExtra("shift_id", shift.id));
         return views;
     }
 

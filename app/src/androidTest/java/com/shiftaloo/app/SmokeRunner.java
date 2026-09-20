@@ -14,10 +14,11 @@ import java.time.LocalDate;
 
 /** Runs only in the test APK on an isolated emulator. No demo data in the app. */
 public final class SmokeRunner extends Instrumentation {
-    MainActivity activity; int checks=0;
-    @Override public void onCreate(Bundle b){super.onCreate(b);start();}
+    MainActivity activity; int checks=0;Bundle args;
+    @Override public void onCreate(Bundle b){super.onCreate(b);args=b;start();}
     void check(boolean value,String why){checks++;if(!value)throw new AssertionError(why);}
     @Override public void onStart(){Bundle result=new Bundle();try{
+        if("large".equals(args.getString("mode"))){activity=(MainActivity)startActivitySync(new Intent(getTargetContext(),MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));capture("08-large-font-home");runOnMainSync(()->activity.showTab(1));capture("09-large-font-calendar");runOnMainSync(()->activity.editShift(null,PersianDate.today().plusDays(7),0));capture("10-large-font-form");result.putString("stream","SHIFTALOO_OK large-font\n");finish(Activity.RESULT_OK,result);return;}
         getTargetContext().deleteDatabase("shiftaloo.db");
         activity=(MainActivity)startActivitySync(new Intent(getTargetContext(),MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         capture("00-empty");
@@ -37,13 +38,17 @@ public final class SmokeRunner extends Instrumentation {
         PersianDate first=new PersianDate(date.year,date.month,1),next=MainActivity.nextMonth(first);
         check(activity.db.filteredShifts(first.atTimeMillis(0,0),next.atTimeMillis(0,0),b.id,Shift.TYPE_EVENING,1).size()==1,"combined filters");
         check(activity.db.monthlyTotal(a.id,date.year,date.month)==14400000,"base salary plus shifts");
+        day.alarmEnabled=true;day.reminderMinutes=30;activity.db.saveShift(day);AlarmScheduler.schedule(activity,day);
+        android.app.AlarmManager alarms=(android.app.AlarmManager)activity.getSystemService(android.content.Context.ALARM_SERVICE);
+        check(alarms.getNextAlarmClock()!=null&&alarms.getNextAlarmClock().getTriggerTime()==day.startMillis-1800000L,"exact alarm scheduled");AlarmScheduler.cancel(activity,day.id);check(alarms.getNextAlarmClock()==null,"alarm cancelled");day.alarmEnabled=false;activity.db.saveShift(day);
+        activity.getSharedPreferences("widgets",0).edit().putLong("73hospital",b.id).putString("73type",Shift.TYPE_EVENING).commit();ShiftWidgetFactory widget=new ShiftWidgetFactory(activity,73);widget.onCreate();check(widget.getCount()==1,"widget combined filters");check(widget.getViewAt(0)!=null,"widget native row");widget.onDestroy();
         for(int i=1;i<6;i++){first=MainActivity.nextMonth(first);for(int j=0;j<i+1;j++)shift(a.id,first.plusDays(j*2),j%2==0?Shift.TYPE_DAY:Shift.TYPE_NIGHT,j%2==0?7:23,j%2==0?15:7,false);}
         runOnMainSync(()->{activity.year=date.year;activity.month=date.month;activity.showTab(0);});capture("01-home");
         runOnMainSync(()->{activity.selected=date;activity.root.findViewWithTag("tab1").performClick();});capture("02-calendar");check(activity.tab==1,"calendar navigation");
         runOnMainSync(()->activity.root.findViewWithTag("tab2").performClick());capture("03-reports");check(activity.tab==2,"report navigation");
-        runOnMainSync(()->{activity.showTab(0);activity.editShift(null,date.plusDays(3),0);});capture("04-new-shift");
+        runOnMainSync(()->{activity.showTab(0);activity.editShift(null,new PersianDate(date.year+1,1,10),0);});capture("04-new-shift");
         runOnMainSync(()->{View decor=activity.activeSheet.getWindow().getDecorView();decor.findViewWithTag("type2").performClick();((EditText)decor.findViewWithTag("shiftAmount")).setText("۳۰۰۰۰۰۰");((EditText)decor.findViewWithTag("shiftNote")).setText("آزمون ثبت شیفت");decor.findViewWithTag("saveShift").performClick();});
-        check(activity.activeSheet==null,"shift saved by actual button");Shift saved=null;for(Shift s:activity.db.allShifts())if(s.note.equals("آزمون ثبت شیفت"))saved=s;check(saved!=null,"persisted UI draft");check(saved.endMillis-saved.startMillis==8*3600000L,"night default 8 hours");check(saved.customAmount==3000000,"Persian number entry");
+        waitForIdleSync();check(activity.activeSheet==null,"shift saved by actual button");Shift saved=null;for(Shift s:activity.db.allShifts())if(s.note.equals("آزمون ثبت شیفت"))saved=s;check(saved!=null,"persisted UI draft");check(saved.endMillis-saved.startMillis==8*3600000L,"night default 8 hours");check(saved.customAmount==3000000,"Persian number entry");
         final Shift edit=saved;runOnMainSync(()->{activity.editShift(edit,null,0);((EditText)activity.activeSheet.getWindow().getDecorView().findViewWithTag("shiftNote")).setText("ویرایش موفق");activity.activeSheet.getWindow().getDecorView().findViewWithTag("saveShift").performClick();});check(activity.db.shift(edit.id).note.equals("ویرایش موفق"),"edit saved");
         runOnMainSync(()->activity.showTab(3));capture("05-hospitals");runOnMainSync(()->activity.filters());capture("06-filters");runOnMainSync(()->activity.activeSheet.dismiss());
         runOnMainSync(()->activity.pickDate(date,d->{}));capture("07-jalali-picker");getUiAutomation().performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK);SystemClock.sleep(400);
